@@ -1,0 +1,638 @@
+{
+    "openapi": "3.0.0",
+    "info": {
+        "title": "Address Normalizer API",
+        "description": "REST API for normalizing and cleaning European postal addresses using AI (OpenAI / Anthropic).",
+        "contact": {
+            "name": "LumenGroup",
+            "url": "https://postalcodes.lumengroup.eu"
+        },
+        "version": "1.0.0"
+    },
+    "servers": [
+        {
+            "url": "http://localhost:8889",
+            "description": "Local Docker"
+        },
+        {
+            "url": "https://postalcodes.lumengroup.eu",
+            "description": "Production"
+        }
+    ],
+    "paths": {
+        "/api/v1/normalize": {
+            "post": {
+                "tags": [
+                    "Address Normalization"
+                ],
+                "summary": "Normalize a single address",
+                "description": "Accepts a raw postal address and returns a normalized, structured result. The address goes through a pipeline: regex pre-cleaning, cache lookup, optional Libpostal parsing, AI normalization (OpenAI/Anthropic), and post-validation.",
+                "operationId": "0708ffd351847aa69f36bd8b8c516cfb",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "country",
+                                    "city",
+                                    "address"
+                                ],
+                                "properties": {
+                                    "country": {
+                                        "description": "ISO 3166-1 alpha-2 country code",
+                                        "type": "string",
+                                        "maxLength": 2,
+                                        "minLength": 2,
+                                        "example": "PL"
+                                    },
+                                    "postal_code": {
+                                        "description": "Postal/ZIP code",
+                                        "type": "string",
+                                        "example": "00-001",
+                                        "nullable": true
+                                    },
+                                    "city": {
+                                        "description": "City name (may contain noise like company names)",
+                                        "type": "string",
+                                        "maxLength": 255,
+                                        "example": "Warszawa FHU Jan Kowalski"
+                                    },
+                                    "address": {
+                                        "description": "Street address (may contain courier comments)",
+                                        "type": "string",
+                                        "maxLength": 500,
+                                        "example": "ul. Marszałkowska 1/2 proszę dzwonić przed dostawą"
+                                    },
+                                    "full_name": {
+                                        "description": "Recipient full name — used for detecting names in wrong fields",
+                                        "type": "string",
+                                        "maxLength": 255,
+                                        "example": "Jan Kowalski",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Address normalized successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "status": {
+                                            "type": "string",
+                                            "enum": [
+                                                "ok"
+                                            ],
+                                            "example": "ok"
+                                        },
+                                        "confidence": {
+                                            "description": "0.0–1.0 confidence score",
+                                            "type": "number",
+                                            "format": "float",
+                                            "example": 0.95
+                                        },
+                                        "source": {
+                                            "type": "string",
+                                            "enum": [
+                                                "cache",
+                                                "ai",
+                                                "libpostal+ai"
+                                            ],
+                                            "example": "ai"
+                                        },
+                                        "data": {
+                                            "$ref": "#/components/schemas/NormalizedAddressData"
+                                        },
+                                        "removed_noise": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string"
+                                            },
+                                            "example": [
+                                                "proszę dzwonić przed dostawą"
+                                            ]
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized — missing or invalid Bearer token",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Unauthenticated."
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "message": {
+                                            "type": "string",
+                                            "example": "The country field is required. (and 1 more error)"
+                                        },
+                                        "errors": {
+                                            "type": "object",
+                                            "example": {
+                                                "country": [
+                                                    "The country field is required."
+                                                ]
+                                            },
+                                            "additionalProperties": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "string"
+                                                }
+                                            }
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Monthly usage limit exceeded",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Monthly usage limit exceeded."
+                                        },
+                                        "limit": {
+                                            "type": "integer",
+                                            "example": 10000
+                                        },
+                                        "used": {
+                                            "type": "integer",
+                                            "example": 10000
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "All AI providers unavailable",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "All AI providers are currently unavailable. Please try again later."
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/normalize/batch": {
+            "post": {
+                "tags": [
+                    "Address Normalization"
+                ],
+                "summary": "Normalize a batch of addresses",
+                "description": "Accepts up to 50 addresses and normalizes them. Addresses found in cache are returned immediately; only cache misses are sent to AI in a single prompt.",
+                "operationId": "574f8072ccd3191da75a61390356eb82",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "addresses"
+                                ],
+                                "properties": {
+                                    "addresses": {
+                                        "description": "Array of addresses to normalize (max 50)",
+                                        "type": "array",
+                                        "items": {
+                                            "required": [
+                                                "country",
+                                                "city",
+                                                "address"
+                                            ],
+                                            "properties": {
+                                                "id": {
+                                                    "description": "Optional ID for mapping results back",
+                                                    "type": "string",
+                                                    "example": "order_12345",
+                                                    "nullable": true
+                                                },
+                                                "country": {
+                                                    "type": "string",
+                                                    "maxLength": 2,
+                                                    "minLength": 2,
+                                                    "example": "PL"
+                                                },
+                                                "postal_code": {
+                                                    "type": "string",
+                                                    "example": "00-001",
+                                                    "nullable": true
+                                                },
+                                                "city": {
+                                                    "type": "string",
+                                                    "maxLength": 255,
+                                                    "example": "Warszawa"
+                                                },
+                                                "address": {
+                                                    "type": "string",
+                                                    "maxLength": 500,
+                                                    "example": "Marszałkowska 1/2"
+                                                },
+                                                "full_name": {
+                                                    "type": "string",
+                                                    "maxLength": 255,
+                                                    "example": "Jan Kowalski",
+                                                    "nullable": true
+                                                }
+                                            },
+                                            "type": "object"
+                                        },
+                                        "maxItems": 50,
+                                        "minItems": 1
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Batch normalization results",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "status": {
+                                            "type": "string",
+                                            "example": "ok"
+                                        },
+                                        "results": {
+                                            "type": "array",
+                                            "items": {
+                                                "properties": {
+                                                    "id": {
+                                                        "type": "string",
+                                                        "example": "order_12345",
+                                                        "nullable": true
+                                                    },
+                                                    "status": {
+                                                        "type": "string",
+                                                        "enum": [
+                                                            "ok",
+                                                            "error"
+                                                        ],
+                                                        "example": "ok"
+                                                    },
+                                                    "confidence": {
+                                                        "type": "number",
+                                                        "format": "float",
+                                                        "example": 0.95
+                                                    },
+                                                    "source": {
+                                                        "type": "string",
+                                                        "enum": [
+                                                            "cache",
+                                                            "ai",
+                                                            "libpostal+ai"
+                                                        ],
+                                                        "example": "ai"
+                                                    },
+                                                    "data": {
+                                                        "$ref": "#/components/schemas/NormalizedAddressData"
+                                                    },
+                                                    "error": {
+                                                        "description": "Error message if status is error",
+                                                        "type": "string",
+                                                        "nullable": true
+                                                    }
+                                                },
+                                                "type": "object"
+                                            }
+                                        },
+                                        "stats": {
+                                            "properties": {
+                                                "total": {
+                                                    "type": "integer",
+                                                    "example": 2
+                                                },
+                                                "from_cache": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "from_ai": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "failed": {
+                                                    "type": "integer",
+                                                    "example": 0
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "$ref": "#/components/responses/Unauthorized"
+                    },
+                    "422": {
+                        "description": "Validation error (e.g. more than 50 addresses)",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "message": {
+                                            "type": "string",
+                                            "example": "The addresses field must not have more than 50 items."
+                                        },
+                                        "errors": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "$ref": "#/components/responses/RateLimitExceeded"
+                    },
+                    "503": {
+                        "$ref": "#/components/responses/ProvidersUnavailable"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/status": {
+            "get": {
+                "tags": [
+                    "Status"
+                ],
+                "summary": "Health check and usage statistics",
+                "description": "Returns the current API client status including monthly usage, remaining quota, cache hit rate, and active AI provider.",
+                "operationId": "3f4b77f50fda21eafd0c314edb535673",
+                "responses": {
+                    "200": {
+                        "description": "Client status and statistics",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "status": {
+                                            "type": "string",
+                                            "example": "ok"
+                                        },
+                                        "client": {
+                                            "description": "Client name",
+                                            "type": "string",
+                                            "example": "sportello"
+                                        },
+                                        "plan_limit": {
+                                            "description": "Monthly request limit",
+                                            "type": "integer",
+                                            "example": 10000
+                                        },
+                                        "used_this_month": {
+                                            "type": "integer",
+                                            "example": 1234
+                                        },
+                                        "remaining": {
+                                            "type": "integer",
+                                            "example": 8766
+                                        },
+                                        "cache_hit_rate": {
+                                            "description": "Ratio 0.0–1.0",
+                                            "type": "number",
+                                            "format": "float",
+                                            "example": 0.72
+                                        },
+                                        "active_provider": {
+                                            "type": "string",
+                                            "enum": [
+                                                "openai",
+                                                "anthropic"
+                                            ],
+                                            "example": "openai"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "$ref": "#/components/responses/Unauthorized"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "NormalizedAddressData": {
+                "title": "Normalized Address",
+                "description": "Structured normalized address data",
+                "required": [
+                    "country_code",
+                    "city",
+                    "formatted"
+                ],
+                "properties": {
+                    "country_code": {
+                        "description": "ISO 3166-1 alpha-2",
+                        "type": "string",
+                        "example": "PL"
+                    },
+                    "region": {
+                        "description": "Region/voivodeship/Bundesland",
+                        "type": "string",
+                        "example": "mazowieckie",
+                        "nullable": true
+                    },
+                    "postal_code": {
+                        "type": "string",
+                        "example": "00-001",
+                        "nullable": true
+                    },
+                    "city": {
+                        "type": "string",
+                        "example": "Warszawa"
+                    },
+                    "street": {
+                        "description": "Street name without prefix (ul., al.)",
+                        "type": "string",
+                        "example": "Marszałkowska",
+                        "nullable": true
+                    },
+                    "house_number": {
+                        "type": "string",
+                        "example": "1",
+                        "nullable": true
+                    },
+                    "apartment_number": {
+                        "type": "string",
+                        "example": "2",
+                        "nullable": true
+                    },
+                    "company_name": {
+                        "description": "Company name extracted from other fields",
+                        "type": "string",
+                        "example": "FHU Jan Kowalski",
+                        "nullable": true
+                    },
+                    "formatted": {
+                        "description": "Human-readable formatted address",
+                        "type": "string",
+                        "example": "Marszałkowska 1/2, 00-001 Warszawa"
+                    }
+                },
+                "type": "object"
+            }
+        },
+        "responses": {
+            "Unauthorized": {
+                "description": "Unauthorized — missing or invalid Bearer token",
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "properties": {
+                                "message": {
+                                    "type": "string",
+                                    "example": "Unauthenticated."
+                                }
+                            },
+                            "type": "object"
+                        }
+                    }
+                }
+            },
+            "RateLimitExceeded": {
+                "description": "Monthly usage limit exceeded",
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "properties": {
+                                "status": {
+                                    "type": "string",
+                                    "example": "error"
+                                },
+                                "message": {
+                                    "type": "string",
+                                    "example": "Monthly usage limit exceeded."
+                                },
+                                "limit": {
+                                    "type": "integer",
+                                    "example": 10000
+                                },
+                                "used": {
+                                    "type": "integer",
+                                    "example": 10000
+                                }
+                            },
+                            "type": "object"
+                        }
+                    }
+                }
+            },
+            "ProvidersUnavailable": {
+                "description": "All AI providers are currently unavailable",
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "properties": {
+                                "status": {
+                                    "type": "string",
+                                    "example": "error"
+                                },
+                                "message": {
+                                    "type": "string",
+                                    "example": "All AI providers are currently unavailable. Please try again later."
+                                }
+                            },
+                            "type": "object"
+                        }
+                    }
+                }
+            }
+        },
+        "securitySchemes": {
+            "bearerAuth": {
+                "type": "http",
+                "description": "API Bearer token authentication. Use: Bearer {your_token}",
+                "scheme": "bearer"
+            }
+        }
+    },
+    "tags": [
+        {
+            "name": "Address Normalization",
+            "description": "Endpoints for normalizing postal addresses"
+        },
+        {
+            "name": "Status",
+            "description": "Health check and usage statistics"
+        }
+    ],
+    "security": [
+        {
+            "bearerAuth": []
+        }
+    ]
+}
