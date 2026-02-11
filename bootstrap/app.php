@@ -15,8 +15,6 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'track.api.usage' => \App\Http\Middleware\TrackApiUsage::class,
         ]);
-
-        $middleware->statefulApi();
     })
     ->withSchedule(function (Schedule $schedule): void {
         $schedule->command('logs:clean-expired')->dailyAt('02:00');
