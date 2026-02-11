@@ -6,6 +6,7 @@ use App\Contracts\LlmProviderInterface;
 use App\DTOs\NormalizedAddress;
 use App\DTOs\RawAddressInput;
 use App\Exceptions\NormalizationException;
+use App\Services\StreetParser;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -16,8 +17,9 @@ class OpenAiProvider implements LlmProviderInterface
     private int $timeout;
     private int $maxRetries;
 
-    public function __construct()
-    {
+    public function __construct(
+        private readonly StreetParser $streetParser = new StreetParser,
+    ) {
         $this->apiKey = config('normalizer.openai.api_key');
         $this->model = config('normalizer.openai.model');
         $this->timeout = config('normalizer.openai.timeout');
@@ -136,13 +138,21 @@ class OpenAiProvider implements LlmProviderInterface
             'full_name' => $input->full_name,
         ], fn ($v) => $v !== null && $v !== '');
 
-        return 'Normalize this address: ' . json_encode($data, JSON_UNESCAPED_UNICODE);
+        $message = 'Normalize this address: ' . json_encode($data, JSON_UNESCAPED_UNICODE);
+
+        $hint = $this->streetParser->formatHint($input->country, $input->address);
+        if ($hint) {
+            $message .= "\n\nHint (regex pre-parse, use as suggestion only): " . $hint;
+        }
+
+        return $message;
     }
 
     private function formatBatchInput(array $inputs): string
     {
-        $addresses = array_map(function (RawAddressInput $input, int $index) {
-            return array_filter([
+        $items = [];
+        foreach ($inputs as $index => $input) {
+            $data = array_filter([
                 'index' => $index,
                 'country' => $input->country,
                 'postal_code' => $input->postal_code,
@@ -150,9 +160,16 @@ class OpenAiProvider implements LlmProviderInterface
                 'address' => $input->address,
                 'full_name' => $input->full_name,
             ], fn ($v) => $v !== null && $v !== '');
-        }, $inputs, array_keys($inputs));
+
+            $hint = $this->streetParser->formatHint($input->country, $input->address);
+            if ($hint) {
+                $data['_hint'] = $hint;
+            }
+
+            $items[] = $data;
+        }
 
         return 'Normalize these addresses and return a JSON array in the same order: ' .
-            json_encode($addresses, JSON_UNESCAPED_UNICODE);
+            json_encode($items, JSON_UNESCAPED_UNICODE);
     }
 }

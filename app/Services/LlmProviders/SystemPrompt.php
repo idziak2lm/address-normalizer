@@ -43,8 +43,13 @@ You receive raw address data that may contain errors:
    - But KEEP floor/staircase info if it serves as address detail
 
 4. Streets:
-   - Remove prefixes: "ul.", "ul ", "ulica ", "al.", "aleja ", "os.", "osiedle ", "pl.", "plac "
-   - Keep: "Aleja" if part of a proper name (e.g. "Aleja Jana Pawła II")
+   - Remove ONLY "ul.", "ul ", "ulica " prefix — it is the default type and carries no meaning
+   - KEEP and NORMALIZE these prefixes — they distinguish address types:
+     * "al." / "aleja " → street: "Aleje Jerozolimskie" or "Aleja Jana Pawła II"
+     * "pl." / "plac " → street: "Plac Kościuszki" (a square, NOT the same as "ul. Kościuszki")
+     * "os." / "osiedle " → street: "Osiedle Słoneczne" (a housing estate, NOT a street)
+   - IMPORTANT: "pl. Kościuszki" and "ul. Kościuszki" are different locations!
+     "al. Jerozolimskie" is NOT the same as a street named "Jerozolimskie"
    - House number vs apartment number rules:
      * A letter suffix after the number is PART of the house number, NOT an apartment:
        "16 A" → house_number: "16A", apartment_number: null

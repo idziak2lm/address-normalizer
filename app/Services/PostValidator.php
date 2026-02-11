@@ -7,10 +7,14 @@ use App\Enums\CountryCode;
 
 class PostValidator
 {
+    public function __construct(
+        private readonly StreetParser $streetParser = new StreetParser,
+    ) {}
+
     /**
      * Validate AI results and adjust confidence accordingly.
      */
-    public function validate(NormalizedAddress $address): NormalizedAddress
+    public function validate(NormalizedAddress $address, ?string $rawAddress = null): NormalizedAddress
     {
         if (! config('normalizer.validate_postal_codes')) {
             return $address;
@@ -31,6 +35,11 @@ class PostValidator
         // Sanity check: house_number should not look like a postal code
         if ($address->house_number && $this->looksLikePostalCode($address->house_number)) {
             $confidencePenalty += 0.2;
+        }
+
+        // Cross-check with regex parse if raw address is available
+        if ($rawAddress && $address->house_number) {
+            $confidencePenalty += $this->crossCheckWithRegex($address, $rawAddress);
         }
 
         if ($confidencePenalty > 0) {
@@ -61,5 +70,30 @@ class PostValidator
     {
         // A 5-digit number is likely a postal code, not a house number
         return (bool) preg_match('/^\d{5,}$/', trim($houseNumber));
+    }
+
+    /**
+     * Cross-check AI result with regex parse. Returns additional penalty.
+     */
+    private function crossCheckWithRegex(NormalizedAddress $address, string $rawAddress): float
+    {
+        $regexResult = $this->streetParser->parse($address->country_code, $rawAddress);
+
+        if (! $regexResult) {
+            return 0.0;
+        }
+
+        $penalty = 0.0;
+
+        // Normalize for comparison (strip spaces, lowercase)
+        $aiNumber = strtolower(preg_replace('/\s+/', '', $address->house_number ?? ''));
+        $regexNumber = strtolower(preg_replace('/\s+/', '', $regexResult['house_number']));
+
+        // If regex and AI disagree on house number, something might be off
+        if ($aiNumber !== '' && $regexNumber !== '' && $aiNumber !== $regexNumber) {
+            $penalty += 0.1;
+        }
+
+        return $penalty;
     }
 }

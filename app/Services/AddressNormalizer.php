@@ -51,8 +51,8 @@ class AddressNormalizer
             // Step 4: AI normalization with fallback
             $result = $this->normalizeWithFallback($cleaned);
 
-            // Step 5: Post-validate
-            $result = $this->postValidator->validate($result);
+            // Step 5: Post-validate (pass raw address for regex cross-check)
+            $result = $this->postValidator->validate($result, $cleaned->address);
 
             // Step 6: Cache store
             $this->cacheManager->store($cleaned, $result);
@@ -103,7 +103,7 @@ class AddressNormalizer
 
                 foreach ($aiResults as $i => $result) {
                     $originalIndex = $toNormalizeIndices[$i];
-                    $result = $this->postValidator->validate($result);
+                    $result = $this->postValidator->validate($result, $toNormalize[$i]->address);
                     $this->cacheManager->store($toNormalize[$i], $result);
 
                     $source = 'ai';

@@ -14,7 +14,7 @@ use OpenApi\Attributes as OA;
         new OA\Property(property: 'region', type: 'string', description: 'Region/voivodeship/Bundesland', example: 'mazowieckie', nullable: true),
         new OA\Property(property: 'postal_code', type: 'string', example: '00-001', nullable: true),
         new OA\Property(property: 'city', type: 'string', example: 'Warszawa'),
-        new OA\Property(property: 'street', type: 'string', description: 'Street name without prefix (ul., al.)', example: 'Marszałkowska', nullable: true),
+        new OA\Property(property: 'street', type: 'string', description: 'Street name (ul. prefix removed; al./pl./os. preserved)', example: 'Marszałkowska', nullable: true),
         new OA\Property(property: 'house_number', type: 'string', example: '1', nullable: true),
         new OA\Property(property: 'apartment_number', type: 'string', example: '2', nullable: true),
         new OA\Property(property: 'company_name', type: 'string', description: 'Company name extracted from other fields', example: 'FHU Jan Kowalski', nullable: true),
