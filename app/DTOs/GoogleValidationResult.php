@@ -24,6 +24,7 @@ final readonly class GoogleValidationResult
         public ?string $correctedStreet,
         public ?bool $isResidential,
         public ?bool $isBusiness,
+        public array $addressComponents = [],
     ) {}
 
     public static function fromApiResponse(array $result): self
@@ -36,16 +37,29 @@ final readonly class GoogleValidationResult
 
         $location = $geocode['location'] ?? [];
 
-        // Extract corrected values from addressComponents
+        // Extract corrected values and granular address components
         $correctedPostalCode = null;
         $correctedCity = null;
         $correctedStreet = null;
+        $addressComponents = [];
 
         foreach ($address['addressComponents'] ?? [] as $component) {
             $type = $component['componentType'] ?? '';
             $text = $component['componentName']['text'] ?? null;
             $replaced = $component['replaced'] ?? false;
             $spellCorrected = $component['spellCorrected'] ?? false;
+            $confirmed = $component['confirmationLevel'] ?? 'UNCONFIRMED';
+            $inferred = $component['inferred'] ?? false;
+
+            if ($text) {
+                $addressComponents[$type] = [
+                    'value' => $text,
+                    'confirmed' => $confirmed === 'CONFIRMED',
+                    'inferred' => $inferred,
+                    'replaced' => $replaced,
+                    'spell_corrected' => $spellCorrected,
+                ];
+            }
 
             if (($replaced || $spellCorrected) && $text) {
                 match ($type) {
@@ -77,6 +91,7 @@ final readonly class GoogleValidationResult
             correctedStreet: $correctedStreet,
             isResidential: $metadata['residential'] ?? null,
             isBusiness: $metadata['business'] ?? null,
+            addressComponents: $addressComponents,
         );
     }
 
@@ -153,6 +168,7 @@ final readonly class GoogleValidationResult
             'latitude' => $this->latitude,
             'longitude' => $this->longitude,
             'place_id' => $this->placeId,
+            'formatted_address' => $this->formattedAddress,
             'validation_granularity' => $this->validationGranularity,
             'geocode_granularity' => $this->geocodeGranularity,
             'address_complete' => $this->addressComplete,
@@ -162,6 +178,7 @@ final readonly class GoogleValidationResult
             'has_spell_corrected_components' => $this->hasSpellCorrectedComponents,
             'is_residential' => $this->isResidential,
             'is_business' => $this->isBusiness,
+            'address_components' => $this->addressComponents,
             'issues' => $this->issues(),
         ];
     }

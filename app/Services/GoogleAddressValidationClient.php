@@ -129,7 +129,9 @@ class GoogleAddressValidationClient
 
     private function buildAddressPayload(NormalizedAddress $address): array
     {
-        $addressLines = [];
+        // Build a full formatted address line for Google to parse.
+        // Google works best with a complete, human-readable address string.
+        $parts = [];
 
         $streetLine = $address->street ?? '';
         if ($address->house_number) {
@@ -141,16 +143,19 @@ class GoogleAddressValidationClient
         $streetLine = trim($streetLine);
 
         if ($streetLine !== '') {
-            $addressLines[] = $streetLine;
+            $parts[] = $streetLine;
         }
 
-        return array_filter([
+        if ($address->postal_code && $address->city) {
+            $parts[] = $address->postal_code . ' ' . $address->city;
+        } elseif ($address->city) {
+            $parts[] = $address->city;
+        }
+
+        return [
             'regionCode' => $address->country_code,
-            'locality' => $address->city,
-            'postalCode' => $address->postal_code,
-            'administrativeArea' => $address->region,
-            'addressLines' => $addressLines ?: null,
-        ]);
+            'addressLines' => [implode(', ', $parts)],
+        ];
     }
 
     /**
