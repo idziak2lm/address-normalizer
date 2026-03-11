@@ -11,6 +11,66 @@
         </div>
     </div>
 
+    {{-- Test single address --}}
+    <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+        <h3 class="text-lg font-medium text-gray-800 mb-4">Test single address</h3>
+
+        <form id="test-form" class="space-y-4">
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label for="test_country" class="block text-sm font-medium text-gray-700 mb-1">Country (ISO)</label>
+                    <input type="text" id="test_country" name="country" value="PL" maxlength="2" required
+                        class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm px-3 py-2 border">
+                </div>
+                <div>
+                    <label for="test_postal_code" class="block text-sm font-medium text-gray-700 mb-1">Postal code</label>
+                    <input type="text" id="test_postal_code" name="postal_code" placeholder="00-001"
+                        class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm px-3 py-2 border">
+                </div>
+            </div>
+            <div>
+                <label for="test_city" class="block text-sm font-medium text-gray-700 mb-1">City</label>
+                <input type="text" id="test_city" name="city" placeholder="Warszawa FHU Kowalski" required
+                    class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm px-3 py-2 border">
+            </div>
+            <div>
+                <label for="test_address" class="block text-sm font-medium text-gray-700 mb-1">Address</label>
+                <input type="text" id="test_address" name="address" placeholder="ul. Marszalkowska 1/2 prosze dzwonic" required
+                    class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm px-3 py-2 border">
+            </div>
+            <div>
+                <label for="test_full_name" class="block text-sm font-medium text-gray-700 mb-1">Full name (optional)</label>
+                <input type="text" id="test_full_name" name="full_name" placeholder="Jan Kowalski"
+                    class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm px-3 py-2 border">
+            </div>
+            @if($googleApiKeyConfigured)
+            <div class="flex items-center gap-2">
+                <input type="checkbox" id="test_google_validate" name="google_validate" value="1"
+                    class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                <label for="test_google_validate" class="text-sm text-gray-700">Enable Google Address Validation (coordinates, quality flags)</label>
+            </div>
+            @endif
+            <div class="flex items-center gap-3">
+                <button type="submit" id="test-submit"
+                    class="rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2">
+                    Test Normalize
+                </button>
+                <span id="test-loading" class="text-sm text-gray-500 hidden">Processing...</span>
+            </div>
+        </form>
+
+        {{-- Test result --}}
+        <div id="test-result" class="mt-4 hidden">
+            <h4 class="text-sm font-semibold text-gray-700 mb-2">Result</h4>
+            <pre id="test-result-json" class="bg-gray-50 border border-gray-200 rounded-md p-4 text-xs text-gray-700 overflow-x-auto max-h-96 whitespace-pre-wrap"></pre>
+        </div>
+        <div id="test-error" class="mt-4 hidden">
+            <div class="rounded-md bg-red-50 border border-red-200 p-4">
+                <p id="test-error-message" class="text-sm text-red-700"></p>
+            </div>
+        </div>
+    </div>
+
     {{-- Upload form --}}
     <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
         <h3 class="text-lg font-medium text-gray-800 mb-4">Upload CSV file</h3>
@@ -25,6 +85,13 @@
                     <p class="mt-1 text-sm text-red-600">{{ $message }}</p>
                 @enderror
             </div>
+            @if($googleApiKeyConfigured)
+            <div class="mb-4 flex items-center gap-2">
+                <input type="checkbox" id="google_validate" name="google_validate" value="1"
+                    class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                <label for="google_validate" class="text-sm text-gray-700">Enable Google Address Validation for all rows</label>
+            </div>
+            @endif
             <button type="submit"
                 class="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
                 Upload & Process
@@ -107,6 +174,7 @@ ORD-12347;DE;10115;Berlin;Friedrichstrasse 123;Hans Mueller;TechGmbH</pre>
                     <tr class="border-b border-gray-200 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         <th class="pb-3 pr-4">File</th>
                         <th class="pb-3 pr-4">Format</th>
+                        <th class="pb-3 pr-4">Google</th>
                         <th class="pb-3 pr-4">Rows</th>
                         <th class="pb-3 pr-4">Progress</th>
                         <th class="pb-3 pr-4">Status</th>
@@ -122,6 +190,13 @@ ORD-12347;DE;10115;Berlin;Friedrichstrasse 123;Hans Mueller;TechGmbH</pre>
                         </td>
                         <td class="py-3 pr-4">
                             <span class="inline-block rounded bg-gray-100 px-2 py-0.5 text-xs">{{ $import->format_variant }}</span>
+                        </td>
+                        <td class="py-3 pr-4">
+                            @if($import->google_validate)
+                                <span class="inline-block rounded bg-green-100 text-green-800 px-2 py-0.5 text-xs">Yes</span>
+                            @else
+                                <span class="inline-block rounded bg-gray-100 text-gray-500 px-2 py-0.5 text-xs">No</span>
+                            @endif
                         </td>
                         <td class="py-3 pr-4">
                             <span class="processed-count">{{ $import->processed_rows }}</span>/{{ $import->total_rows }}
@@ -174,6 +249,65 @@ ORD-12347;DE;10115;Berlin;Friedrichstrasse 123;Hans Mueller;TechGmbH</pre>
     @endif
 
 </div>
+
+{{-- Test form handler --}}
+<script>
+    document.getElementById('test-form').addEventListener('submit', function(e) {
+        e.preventDefault();
+
+        const form = e.target;
+        const submitBtn = document.getElementById('test-submit');
+        const loading = document.getElementById('test-loading');
+        const resultDiv = document.getElementById('test-result');
+        const resultJson = document.getElementById('test-result-json');
+        const errorDiv = document.getElementById('test-error');
+        const errorMsg = document.getElementById('test-error-message');
+
+        // Reset
+        resultDiv.classList.add('hidden');
+        errorDiv.classList.add('hidden');
+        submitBtn.disabled = true;
+        loading.classList.remove('hidden');
+
+        const data = {
+            country: form.country.value,
+            city: form.city.value,
+            address: form.address.value,
+        };
+        if (form.postal_code.value) data.postal_code = form.postal_code.value;
+        if (form.full_name.value) data.full_name = form.full_name.value;
+        if (form.google_validate && form.google_validate.checked) data.google_validate = true;
+
+        fetch('{{ route("csv.test") }}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'X-CSRF-TOKEN': '{{ csrf_token() }}',
+            },
+            body: JSON.stringify(data),
+        })
+        .then(r => r.json())
+        .then(json => {
+            submitBtn.disabled = false;
+            loading.classList.add('hidden');
+
+            if (json.status === 'ok') {
+                resultJson.textContent = JSON.stringify(json, null, 2);
+                resultDiv.classList.remove('hidden');
+            } else {
+                errorMsg.textContent = json.message || 'Unknown error';
+                errorDiv.classList.remove('hidden');
+            }
+        })
+        .catch(err => {
+            submitBtn.disabled = false;
+            loading.classList.add('hidden');
+            errorMsg.textContent = 'Request failed: ' + err.message;
+            errorDiv.classList.remove('hidden');
+        });
+    });
+</script>
 
 {{-- Auto-refresh for pending/processing imports --}}
 @if($imports->contains(fn ($i) => !$i->isFinished()))

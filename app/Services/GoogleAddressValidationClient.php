@@ -18,11 +18,25 @@ class GoogleAddressValidationClient
     }
 
     /**
-     * Validate and enrich a normalized address via Google Address Validation API.
+     * Check if the API key is configured (regardless of enabled flag).
      */
-    public function validate(NormalizedAddress $address): ?GoogleValidationResult
+    public function hasApiKey(): bool
     {
-        if (! $this->isEnabled()) {
+        return ! empty(config('normalizer.google_validation.api_key'));
+    }
+
+    /**
+     * Validate and enrich a normalized address via Google Address Validation API.
+     *
+     * @param  bool  $force  Bypass the enabled check (still requires API key)
+     */
+    public function validate(NormalizedAddress $address, bool $force = false): ?GoogleValidationResult
+    {
+        if (! $force && ! $this->isEnabled()) {
+            return null;
+        }
+
+        if (! $this->hasApiKey()) {
             return null;
         }
 
@@ -61,14 +75,21 @@ class GoogleAddressValidationClient
 
     /**
      * Validate a raw address (not yet normalized) via Google Address Validation API.
+     *
+     * @param  bool  $force  Bypass the enabled check (still requires API key)
      */
     public function validateRaw(
         string $countryCode,
         ?string $postalCode,
         string $city,
         string $address,
+        bool $force = false,
     ): ?GoogleValidationResult {
-        if (! $this->isEnabled()) {
+        if (! $force && ! $this->isEnabled()) {
+            return null;
+        }
+
+        if (! $this->hasApiKey()) {
             return null;
         }
 

@@ -325,7 +325,7 @@ DESC,
     )]
     public function validate(ValidateAddressRequest $request): JsonResponse
     {
-        if (! $this->googleValidator->isEnabled()) {
+        if (! $this->googleValidator->hasApiKey()) {
             return response()->json([
                 'status' => 'error',
                 'message' => 'Google Address Validation is not configured. Set GOOGLE_VALIDATION_API_KEY in server configuration.',
@@ -339,6 +339,7 @@ DESC,
             postalCode: $validated['postal_code'] ?? null,
             city: $validated['city'],
             address: $validated['address'],
+            force: true,
         );
 
         if (! $result) {

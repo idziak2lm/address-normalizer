@@ -144,7 +144,9 @@ class ProcessCsvBatch implements ShouldQueue
     private function processChunk(AddressNormalizer $normalizer, $client, array $inputs, array $references): array
     {
         try {
-            $batchResult = $normalizer->normalizeBatch($inputs, $client);
+            $import = CsvBatchImport::find($this->importId);
+            $googleValidate = $import?->google_validate ? true : null;
+            $batchResult = $normalizer->normalizeBatch($inputs, $client, $googleValidate);
             $rows = [];
 
             foreach ($batchResult['results'] as $i => $result) {

@@ -37,6 +37,8 @@ class AddressNormalizer
             // Step 2: Cache lookup
             $cached = $this->cacheManager->lookup($cleaned);
             if ($cached) {
+                // Apply Google validation to cache hits when explicitly requested
+                $cached = $this->applyGoogleValidation($cached, $googleValidate);
                 $this->logRequest($client, $input, $cached, 'cache', null, $startTime);
 
                 return $this->formatResponse($cached, 'cache');
@@ -87,6 +89,7 @@ class AddressNormalizer
             $cached = $this->cacheManager->lookup($cleaned);
 
             if ($cached) {
+                $cached = $this->applyGoogleValidation($cached, $googleValidate);
                 $results[$index] = [
                     'id' => $input->id,
                     'status' => 'ok',
@@ -173,7 +176,8 @@ class AddressNormalizer
             return $result;
         }
 
-        $validation = $this->googleValidator->validate($result);
+        $force = $googleValidate === true;
+        $validation = $this->googleValidator->validate($result, $force);
 
         if (! $validation) {
             return $result;

@@ -2,11 +2,14 @@
 
 namespace App\Http\Controllers\Web;
 
+use App\DTOs\RawAddressInput;
 use App\Http\Controllers\Controller;
 use App\Jobs\ProcessCsvBatch;
 use App\Models\ApiClient;
 use App\Models\CsvBatchImport;
+use App\Services\AddressNormalizer;
 use App\Services\CsvFormatDetector;
+use App\Services\GoogleAddressValidationClient;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -19,6 +22,8 @@ class CsvUploadController extends Controller
 {
     public function __construct(
         private readonly CsvFormatDetector $detector,
+        private readonly AddressNormalizer $normalizer,
+        private readonly GoogleAddressValidationClient $googleValidator,
     ) {}
 
     public function showLoginForm(): View
@@ -65,6 +70,7 @@ class CsvUploadController extends Controller
             'imports' => $imports,
             'variants' => CsvFormatDetector::supportedVariants(),
             'maxRows' => config('normalizer.csv.max_rows', 10000),
+            'googleApiKeyConfigured' => $this->googleValidator->hasApiKey(),
         ]);
     }
 
@@ -72,6 +78,7 @@ class CsvUploadController extends Controller
     {
         $request->validate([
             'csv_file' => 'required|file|mimes:csv,txt|max:10240',
+            'google_validate' => 'nullable|boolean',
         ]);
 
         $client = $request->user();
@@ -127,6 +134,7 @@ class CsvUploadController extends Controller
             'original_filename' => $file->getClientOriginalName(),
             'stored_filename' => $storedFilename,
             'format_variant' => $variant,
+            'google_validate' => (bool) $request->input('google_validate', false),
             'total_rows' => $rowCount,
             'status' => CsvBatchImport::STATUS_PENDING,
         ]);
@@ -157,6 +165,34 @@ class CsvUploadController extends Controller
             'error_message' => $import->error_message,
             'has_result' => $import->result_filename !== null,
         ]);
+    }
+
+    public function test(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'country' => 'required|string|size:2',
+            'city' => 'required|string|max:255',
+            'address' => 'required|string|max:500',
+            'postal_code' => 'nullable|string|max:20',
+            'full_name' => 'nullable|string|max:255',
+            'google_validate' => 'nullable|boolean',
+        ]);
+
+        $client = $request->user();
+
+        $input = RawAddressInput::fromArray($validated);
+        $googleValidate = ! empty($validated['google_validate']) ? true : null;
+
+        try {
+            $result = $this->normalizer->normalize($input, $client, $googleValidate);
+
+            return response()->json($result);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => $e->getMessage(),
+            ], 500);
+        }
     }
 
     public function download(Request $request, CsvBatchImport $import): StreamedResponse|RedirectResponse

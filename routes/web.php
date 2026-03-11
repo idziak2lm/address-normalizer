@@ -11,6 +11,7 @@ Route::prefix('csv')->group(function () {
         Route::post('/logout', [CsvUploadController::class, 'logout'])->name('csv.logout');
         Route::get('/', [CsvUploadController::class, 'index'])->name('csv.index');
         Route::post('/upload', [CsvUploadController::class, 'upload'])->name('csv.upload');
+        Route::post('/test', [CsvUploadController::class, 'test'])->name('csv.test');
         Route::get('/{import}/status', [CsvUploadController::class, 'status'])->name('csv.status');
         Route::get('/{import}/download', [CsvUploadController::class, 'download'])->name('csv.download');
     });

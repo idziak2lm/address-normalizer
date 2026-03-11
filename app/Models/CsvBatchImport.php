@@ -17,6 +17,7 @@ class CsvBatchImport extends Model
         'original_filename',
         'stored_filename',
         'format_variant',
+        'google_validate',
         'total_rows',
         'processed_rows',
         'failed_rows',
@@ -30,6 +31,7 @@ class CsvBatchImport extends Model
     protected function casts(): array
     {
         return [
+            'google_validate' => 'boolean',
             'total_rows' => 'integer',
             'processed_rows' => 'integer',
             'failed_rows' => 'integer',

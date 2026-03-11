@@ -43,10 +43,6 @@ class AddressNormalizerServiceProvider extends ServiceProvider
                 ? $app->make(LibpostalClient::class)
                 : null;
 
-            $googleValidator = config('normalizer.google_validation.enabled')
-                ? $app->make(GoogleAddressValidationClient::class)
-                : null;
-
             return new AddressNormalizer(
                 preCleaner: $app->make(PreCleaner::class),
                 cacheManager: $app->make(CacheManager::class),
@@ -54,7 +50,7 @@ class AddressNormalizerServiceProvider extends ServiceProvider
                 primaryProvider: $primary,
                 fallbackProvider: $fallback,
                 addressParser: $parser,
-                googleValidator: $googleValidator,
+                googleValidator: $app->make(GoogleAddressValidationClient::class),
             );
         });
     }
