@@ -6,6 +6,7 @@ use App\Contracts\AddressParserInterface;
 use App\Contracts\LlmProviderInterface;
 use App\Services\AddressNormalizer;
 use App\Services\CacheManager;
+use App\Services\GoogleAddressValidationClient;
 use App\Services\LlmProviders\AnthropicProvider;
 use App\Services\LlmProviders\OpenAiProvider;
 use App\Services\Parsers\LibpostalClient;
@@ -23,6 +24,7 @@ class AddressNormalizerServiceProvider extends ServiceProvider
         $this->app->singleton(OpenAiProvider::class);
         $this->app->singleton(AnthropicProvider::class);
         $this->app->singleton(LibpostalClient::class);
+        $this->app->singleton(GoogleAddressValidationClient::class);
 
         $this->app->bind(AddressParserInterface::class, LibpostalClient::class);
 
@@ -41,6 +43,10 @@ class AddressNormalizerServiceProvider extends ServiceProvider
                 ? $app->make(LibpostalClient::class)
                 : null;
 
+            $googleValidator = config('normalizer.google_validation.enabled')
+                ? $app->make(GoogleAddressValidationClient::class)
+                : null;
+
             return new AddressNormalizer(
                 preCleaner: $app->make(PreCleaner::class),
                 cacheManager: $app->make(CacheManager::class),
@@ -48,6 +54,7 @@ class AddressNormalizerServiceProvider extends ServiceProvider
                 primaryProvider: $primary,
                 fallbackProvider: $fallback,
                 addressParser: $parser,
+                googleValidator: $googleValidator,
             );
         });
     }

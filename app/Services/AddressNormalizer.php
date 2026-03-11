@@ -20,12 +20,13 @@ class AddressNormalizer
         private readonly LlmProviderInterface $primaryProvider,
         private readonly ?LlmProviderInterface $fallbackProvider = null,
         private readonly ?AddressParserInterface $addressParser = null,
+        private readonly ?GoogleAddressValidationClient $googleValidator = null,
     ) {}
 
     /**
      * Normalize a single address through the full pipeline.
      */
-    public function normalize(RawAddressInput $input, ApiClient $client): array
+    public function normalize(RawAddressInput $input, ApiClient $client, ?bool $googleValidate = null): array
     {
         $startTime = microtime(true);
 
@@ -54,10 +55,13 @@ class AddressNormalizer
             // Step 5: Post-validate (pass raw address for regex cross-check)
             $result = $this->postValidator->validate($result, $cleaned->address);
 
-            // Step 6: Cache store
+            // Step 6: Google Address Validation (optional, controlled per-request)
+            $result = $this->applyGoogleValidation($result, $googleValidate);
+
+            // Step 7: Cache store
             $this->cacheManager->store($cleaned, $result);
 
-            // Step 7: Log
+            // Step 8: Log
             $provider = $this->getUsedProvider($cleaned);
             $this->logRequest($client, $input, $result, $source, $provider, $startTime);
 
@@ -71,7 +75,7 @@ class AddressNormalizer
     /**
      * Normalize a batch of addresses.
      */
-    public function normalizeBatch(array $inputs, ApiClient $client): array
+    public function normalizeBatch(array $inputs, ApiClient $client, ?bool $googleValidate = null): array
     {
         $results = [];
         $toNormalize = [];
@@ -104,6 +108,7 @@ class AddressNormalizer
                 foreach ($aiResults as $i => $result) {
                     $originalIndex = $toNormalizeIndices[$i];
                     $result = $this->postValidator->validate($result, $toNormalize[$i]->address);
+                    $result = $this->applyGoogleValidation($result, $googleValidate);
                     $this->cacheManager->store($toNormalize[$i], $result);
 
                     $source = 'ai';
@@ -151,6 +156,30 @@ class AddressNormalizer
                 'failed' => $failed,
             ],
         ];
+    }
+
+    private function applyGoogleValidation(NormalizedAddress $result, ?bool $googleValidate = null): NormalizedAddress
+    {
+        // Per-request override: false = skip, true = force, null = use server config
+        if ($googleValidate === false) {
+            return $result;
+        }
+
+        if ($googleValidate !== true && ! $this->googleValidator?->isEnabled()) {
+            return $result;
+        }
+
+        if (! $this->googleValidator) {
+            return $result;
+        }
+
+        $validation = $this->googleValidator->validate($result);
+
+        if (! $validation) {
+            return $result;
+        }
+
+        return $this->googleValidator->applyCorrections($result, $validation);
     }
 
     private function normalizeWithFallback(RawAddressInput $input): NormalizedAddress

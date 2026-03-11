@@ -42,6 +42,11 @@ class ApiClient extends Model implements AuthenticatableContract
         return $this->hasMany(RequestLog::class);
     }
 
+    public function csvBatchImports(): HasMany
+    {
+        return $this->hasMany(CsvBatchImport::class);
+    }
+
     public function hasReachedLimit(): bool
     {
         return $this->current_month_usage >= $this->monthly_limit;

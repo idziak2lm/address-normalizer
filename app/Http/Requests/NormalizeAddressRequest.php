@@ -19,6 +19,7 @@ class NormalizeAddressRequest extends FormRequest
             'address' => ['required', 'string', 'max:500'],
             'postal_code' => ['nullable', 'string', 'max:20'],
             'full_name' => ['nullable', 'string', 'max:255'],
+            'google_validate' => ['nullable', 'boolean'],
         ];
     }
 }

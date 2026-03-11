@@ -20,6 +20,13 @@ return [
         'max_retries' => (int) env('ANTHROPIC_MAX_RETRIES', 2),
     ],
 
+    // Google Address Validation (optional post-validation + geocoding)
+    'google_validation' => [
+        'enabled' => (bool) env('GOOGLE_VALIDATION_ENABLED', false),
+        'api_key' => env('GOOGLE_VALIDATION_API_KEY'),
+        'timeout' => (int) env('GOOGLE_VALIDATION_TIMEOUT', 5),
+    ],
+
     // Libpostal (optional microservice)
     'libpostal' => [
         'enabled' => (bool) env('LIBPOSTAL_ENABLED', false),
@@ -42,4 +49,13 @@ return [
 
     // Postcode validation
     'validate_postal_codes' => (bool) env('NORMALIZER_VALIDATE_POSTCODES', true),
+
+    // CSV batch upload
+    'csv' => [
+        'max_rows' => (int) env('NORMALIZER_CSV_MAX_ROWS', 10000),
+        'chunk_size' => 50,
+        'upload_path' => 'csv-uploads',
+        'export_path' => 'csv-exports',
+        'retention_days' => (int) env('NORMALIZER_CSV_RETENTION_DAYS', 7),
+    ],
 ];

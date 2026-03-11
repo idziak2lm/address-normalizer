@@ -13,8 +13,14 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use OpenApi\Attributes as OA;
 
-#[OA\Tag(name: 'Address Normalization', description: 'Endpoints for normalizing postal addresses')]
-#[OA\Tag(name: 'Status', description: 'Health check and usage statistics')]
+#[OA\Tag(
+    name: 'Address Normalization',
+    description: 'Normalize single or batch postal addresses. Send raw, messy address data and receive structured, validated results with confidence scores. Supports 31 European countries.',
+)]
+#[OA\Tag(
+    name: 'Status',
+    description: 'Check API health, your monthly usage, remaining quota, cache hit rate, and which AI provider is active.',
+)]
 class AddressController extends Controller
 {
     public function __construct(
@@ -24,7 +30,22 @@ class AddressController extends Controller
     #[OA\Post(
         path: '/api/v1/normalize',
         summary: 'Normalize a single address',
-        description: 'Accepts a raw postal address and returns a normalized, structured result. The address goes through a pipeline: regex pre-cleaning, cache lookup, optional Libpostal parsing, AI normalization (OpenAI/Anthropic), and post-validation.',
+        description: <<<'DESC'
+Accepts a raw postal address and returns a normalized, structured result.
+
+**When to use:** For real-time normalization of individual addresses — e.g. at checkout, during order import, or when validating a single delivery address.
+
+**Pipeline:** regex pre-cleaning → cache lookup → street parsing → AI normalization (OpenAI/Anthropic) → post-validation → optional Google validation → cache store.
+
+**What it does:**
+- Extracts company names from wrong fields (e.g. "Warszawa FHU Kowalski" → city: "Warszawa", company: "FHU Kowalski")
+- Removes courier comments, phone numbers, emails from address fields
+- Splits house/apartment numbers (e.g. "15/4" → house: "15", apartment: "4")
+- Validates postal code format against country
+- Optionally adds geographic coordinates via Google Address Validation
+
+**Performance:** ~50ms for cache hits, ~1-3s for AI calls (first time).
+DESC,
         security: [['bearerAuth' => []]],
         tags: ['Address Normalization'],
     )]
@@ -33,11 +54,12 @@ class AddressController extends Controller
         content: new OA\JsonContent(
             required: ['country', 'city', 'address'],
             properties: [
-                new OA\Property(property: 'country', type: 'string', description: 'ISO 3166-1 alpha-2 country code', example: 'PL', minLength: 2, maxLength: 2),
-                new OA\Property(property: 'postal_code', type: 'string', description: 'Postal/ZIP code', example: '00-001', nullable: true),
-                new OA\Property(property: 'city', type: 'string', description: 'City name (may contain noise like company names)', example: 'Warszawa FHU Jan Kowalski', maxLength: 255),
-                new OA\Property(property: 'address', type: 'string', description: 'Street address (may contain courier comments)', example: 'ul. Marszałkowska 1/2 proszę dzwonić przed dostawą', maxLength: 500),
-                new OA\Property(property: 'full_name', type: 'string', description: 'Recipient full name — used for detecting names in wrong fields', example: 'Jan Kowalski', nullable: true, maxLength: 255),
+                new OA\Property(property: 'country', type: 'string', description: 'ISO 3166-1 alpha-2 country code. Supported: PL, CZ, SK, DE, AT, CH, FR, IT, ES, PT, NL, BE, LU, GB, IE, DK, SE, NO, FI, HU, RO, BG, HR, SI, GR, CY, MT, LT, LV, EE, UA.', example: 'PL', minLength: 2, maxLength: 2),
+                new OA\Property(property: 'postal_code', type: 'string', description: 'Postal/ZIP code. If missing, the AI will try to infer it. If present in the city or address field, it will be extracted automatically.', example: '00-001', nullable: true),
+                new OA\Property(property: 'city', type: 'string', description: 'City name. May contain noise — the system handles company names (e.g. "Warszawa FHU Kowalski"), postal codes (e.g. "00-950 Warszawa"), and other garbage mixed in.', example: 'Warszawa FHU Jan Kowalski', maxLength: 255),
+                new OA\Property(property: 'address', type: 'string', description: 'Street address line. May contain: street prefixes (ul., al.), house/apartment numbers (15/4, 15 m. 4), courier comments, phone numbers — all will be parsed and cleaned.', example: 'ul. Marszałkowska 1/2 proszę dzwonić przed dostawą', maxLength: 500),
+                new OA\Property(property: 'full_name', type: 'string', description: 'Recipient full name. Helps the AI distinguish personal names from company names when they appear in wrong fields. Recommended but not required.', example: 'Jan Kowalski', nullable: true, maxLength: 255),
+                new OA\Property(property: 'google_validate', type: 'boolean', description: 'Override Google Address Validation for this request. `true` = force validation (requires API key configured on server), `false` = skip validation, omit = use server default.', example: true, nullable: true),
             ],
         ),
     )]
@@ -101,11 +123,13 @@ class AddressController extends Controller
     public function normalize(NormalizeAddressRequest $request): JsonResponse
     {
         $client = $request->user();
+        $validated = $request->validated();
 
-        $input = RawAddressInput::fromArray($request->validated());
+        $input = RawAddressInput::fromArray($validated);
+        $googleValidate = isset($validated['google_validate']) ? (bool) $validated['google_validate'] : null;
 
         try {
-            $result = $this->normalizer->normalize($input, $client);
+            $result = $this->normalizer->normalize($input, $client, $googleValidate);
 
             return response()->json($result);
         } catch (NormalizationException) {
@@ -119,7 +143,15 @@ class AddressController extends Controller
     #[OA\Post(
         path: '/api/v1/normalize/batch',
         summary: 'Normalize a batch of addresses',
-        description: 'Accepts up to 50 addresses and normalizes them. Addresses found in cache are returned immediately; only cache misses are sent to AI in a single prompt.',
+        description: <<<'DESC'
+Accepts up to 50 addresses and normalizes them in a single request.
+
+**When to use:** For bulk processing of multiple addresses — e.g. nightly order cleanup, CSV import pipeline, or batch validation of customer databases.
+
+**How it works:** Cache hits are returned immediately. Only cache misses are sent to AI in a single prompt, minimizing API calls and latency. Each address counts as one request toward your monthly limit.
+
+**Tip:** Include an `id` field (e.g. order number) in each address to easily map results back to your records. For more than 50 addresses, use the CSV batch upload at `/csv`.
+DESC,
         security: [['bearerAuth' => []]],
         tags: ['Address Normalization'],
     )]
@@ -128,6 +160,7 @@ class AddressController extends Controller
         content: new OA\JsonContent(
             required: ['addresses'],
             properties: [
+                new OA\Property(property: 'google_validate', type: 'boolean', description: 'Override Google Address Validation for all addresses in this batch. `true` = force, `false` = skip, omit = server default.', example: true, nullable: true),
                 new OA\Property(
                     property: 'addresses',
                     type: 'array',
@@ -207,8 +240,10 @@ class AddressController extends Controller
             $validated['addresses']
         );
 
+        $googleValidate = isset($validated['google_validate']) ? (bool) $validated['google_validate'] : null;
+
         try {
-            $result = $this->normalizer->normalizeBatch($inputs, $client);
+            $result = $this->normalizer->normalizeBatch($inputs, $client, $googleValidate);
 
             return response()->json($result);
         } catch (NormalizationException) {
@@ -222,7 +257,13 @@ class AddressController extends Controller
     #[OA\Get(
         path: '/api/v1/status',
         summary: 'Health check and usage statistics',
-        description: 'Returns the current API client status including monthly usage, remaining quota, cache hit rate, and active AI provider.',
+        description: <<<'DESC'
+Returns the current API client status.
+
+**When to use:** To monitor your usage, check remaining quota before a large batch, or verify the API is operational.
+
+**Returns:** client name, monthly limit, current usage, remaining requests, cache hit rate (0.0–1.0), and which AI provider is active (openai or anthropic).
+DESC,
         security: [['bearerAuth' => []]],
         tags: ['Status'],
     )]

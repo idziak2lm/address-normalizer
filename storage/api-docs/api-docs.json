@@ -2,21 +2,21 @@
     "openapi": "3.0.0",
     "info": {
         "title": "Address Normalizer API",
-        "description": "REST API for normalizing and cleaning European postal addresses using AI (OpenAI / Anthropic).",
+        "description": "## Overview\n\nAddress Normalizer is a REST API for cleaning and normalizing messy postal addresses from European countries.\nIt uses an AI pipeline (OpenAI / Anthropic) combined with regex pre-parsing, postal code validation,\nand optional Google Address Validation for geocoding.\n\n## How it works\n\nEach address goes through the following pipeline:\n\n1. **Pre-cleaning** — regex removes phone numbers, emails, emojis, excessive whitespace\n2. **Cache lookup** — Redis cache (30-day TTL); if hit, returns immediately\n3. **Street parsing** — country-specific regex extracts street, house number, apartment\n4. **AI normalization** — LLM (GPT-4o-mini or Claude Sonnet) parses the full address, extracts company names, identifies noise\n5. **Post-validation** — validates postal code format against country, cross-checks with regex, adjusts confidence\n6. **Google validation** *(optional)* — verifies address via Google Address Validation API, returns coordinates and quality flags\n7. **Cache store** — result is cached for future lookups\n\n## Authentication\n\nAll endpoints require a **Bearer token** in the `Authorization` header:\n\n```\nAuthorization: Bearer your_api_token_here\n```\n\nTokens are issued per client. Contact the administrator to obtain one.\n\n## Rate limits\n\nEach client has a **monthly request limit**. When exceeded, the API returns `429 Too Many Requests`.\nCheck your current usage via the `GET /api/v1/status` endpoint.\n\nFor batch requests, each address in the batch counts as one request toward your limit.\n\n## Supported countries\n\nThe API supports **31 European countries**: PL, CZ, SK, DE, AT, CH, FR, IT, ES, PT, NL, BE, LU, GB, IE,\nDK, SE, NO, FI, HU, RO, BG, HR, SI, GR, CY, MT, LT, LV, EE, UA.\n\n## Confidence score\n\nEvery result includes a `confidence` score (0.0–1.0):\n\n| Range | Meaning |\n|-------|---------|\n| **0.9–1.0** | Address is clear and unambiguous |\n| **0.7–0.89** | High confidence, minor uncertainties |\n| **0.5–0.69** | Moderate confidence, some data may be missing or ambiguous |\n| **< 0.5** | Low confidence — review manually |\n\nThe score is determined by the AI and then adjusted by post-validation checks\n(postal code format, regex cross-check, Google validation).\n\n## Source field\n\nThe `source` field indicates how the result was obtained:\n\n- `cache` — returned from Redis cache (no AI call, fastest)\n- `ai` — normalized by AI provider (OpenAI or Anthropic)\n- `libpostal+ai` — pre-parsed by Libpostal, then normalized by AI\n\n## Google validation\n\nWhen enabled, results include a `google_validation` object with:\n- **Coordinates** (`latitude`, `longitude`) — geographic location\n- **Validation granularity** — how precisely Google matched the address (`SUB_PREMISE` = best, `OTHER` = worst)\n- **Quality flags** — `address_complete`, `has_unconfirmed_components`, `has_inferred_components`, etc.\n- **Property type** — `is_residential`, `is_business`\n- **Issues** — human-readable list of problems found\n\n## CSV batch upload\n\nFor bulk processing (up to 10,000 addresses), use the web interface at `/csv`.\nUpload a semicolon-separated CSV file and download results when processing completes.\n\n## Error codes\n\n| Code | Meaning |\n|------|---------|\n| `200` | Success |\n| `401` | Missing or invalid Bearer token |\n| `422` | Validation error (missing/invalid fields) |\n| `429` | Monthly usage limit exceeded |\n| `503` | All AI providers unavailable |",
         "contact": {
-            "name": "LumenGroup",
+            "name": "Address Normalizer Support",
             "url": "https://postalcodes.lumengroup.eu"
         },
         "version": "1.0.0"
     },
     "servers": [
         {
-            "url": "http://localhost:8889",
-            "description": "Local Docker"
-        },
-        {
             "url": "https://postalcodes.lumengroup.eu",
             "description": "Production"
+        },
+        {
+            "url": "http://localhost:8889",
+            "description": "Local development"
         }
     ],
     "paths": {
@@ -26,7 +26,7 @@
                     "Address Normalization"
                 ],
                 "summary": "Normalize a single address",
-                "description": "Accepts a raw postal address and returns a normalized, structured result. The address goes through a pipeline: regex pre-cleaning, cache lookup, optional Libpostal parsing, AI normalization (OpenAI/Anthropic), and post-validation.",
+                "description": "Accepts a raw postal address and returns a normalized, structured result.\n\n**When to use:** For real-time normalization of individual addresses — e.g. at checkout, during order import, or when validating a single delivery address.\n\n**Pipeline:** regex pre-cleaning → cache lookup → street parsing → AI normalization (OpenAI/Anthropic) → post-validation → optional Google validation → cache store.\n\n**What it does:**\n- Extracts company names from wrong fields (e.g. \"Warszawa FHU Kowalski\" → city: \"Warszawa\", company: \"FHU Kowalski\")\n- Removes courier comments, phone numbers, emails from address fields\n- Splits house/apartment numbers (e.g. \"15/4\" → house: \"15\", apartment: \"4\")\n- Validates postal code format against country\n- Optionally adds geographic coordinates via Google Address Validation\n\n**Performance:** ~50ms for cache hits, ~1-3s for AI calls (first time).",
                 "operationId": "0708ffd351847aa69f36bd8b8c516cfb",
                 "requestBody": {
                     "required": true,
@@ -40,35 +40,41 @@
                                 ],
                                 "properties": {
                                     "country": {
-                                        "description": "ISO 3166-1 alpha-2 country code",
+                                        "description": "ISO 3166-1 alpha-2 country code. Supported: PL, CZ, SK, DE, AT, CH, FR, IT, ES, PT, NL, BE, LU, GB, IE, DK, SE, NO, FI, HU, RO, BG, HR, SI, GR, CY, MT, LT, LV, EE, UA.",
                                         "type": "string",
                                         "maxLength": 2,
                                         "minLength": 2,
                                         "example": "PL"
                                     },
                                     "postal_code": {
-                                        "description": "Postal/ZIP code",
+                                        "description": "Postal/ZIP code. If missing, the AI will try to infer it. If present in the city or address field, it will be extracted automatically.",
                                         "type": "string",
                                         "example": "00-001",
                                         "nullable": true
                                     },
                                     "city": {
-                                        "description": "City name (may contain noise like company names)",
+                                        "description": "City name. May contain noise — the system handles company names (e.g. \"Warszawa FHU Kowalski\"), postal codes (e.g. \"00-950 Warszawa\"), and other garbage mixed in.",
                                         "type": "string",
                                         "maxLength": 255,
                                         "example": "Warszawa FHU Jan Kowalski"
                                     },
                                     "address": {
-                                        "description": "Street address (may contain courier comments)",
+                                        "description": "Street address line. May contain: street prefixes (ul., al.), house/apartment numbers (15/4, 15 m. 4), courier comments, phone numbers — all will be parsed and cleaned.",
                                         "type": "string",
                                         "maxLength": 500,
                                         "example": "ul. Marszałkowska 1/2 proszę dzwonić przed dostawą"
                                     },
                                     "full_name": {
-                                        "description": "Recipient full name — used for detecting names in wrong fields",
+                                        "description": "Recipient full name. Helps the AI distinguish personal names from company names when they appear in wrong fields. Recommended but not required.",
                                         "type": "string",
                                         "maxLength": 255,
                                         "example": "Jan Kowalski",
+                                        "nullable": true
+                                    },
+                                    "google_validate": {
+                                        "description": "Override Google Address Validation for this request. `true` = force validation (requires API key configured on server), `false` = skip validation, omit = use server default.",
+                                        "type": "boolean",
+                                        "example": true,
                                         "nullable": true
                                     }
                                 },
@@ -232,7 +238,7 @@
                     "Address Normalization"
                 ],
                 "summary": "Normalize a batch of addresses",
-                "description": "Accepts up to 50 addresses and normalizes them. Addresses found in cache are returned immediately; only cache misses are sent to AI in a single prompt.",
+                "description": "Accepts up to 50 addresses and normalizes them in a single request.\n\n**When to use:** For bulk processing of multiple addresses — e.g. nightly order cleanup, CSV import pipeline, or batch validation of customer databases.\n\n**How it works:** Cache hits are returned immediately. Only cache misses are sent to AI in a single prompt, minimizing API calls and latency. Each address counts as one request toward your monthly limit.\n\n**Tip:** Include an `id` field (e.g. order number) in each address to easily map results back to your records. For more than 50 addresses, use the CSV batch upload at `/csv`.",
                 "operationId": "574f8072ccd3191da75a61390356eb82",
                 "requestBody": {
                     "required": true,
@@ -243,6 +249,12 @@
                                     "addresses"
                                 ],
                                 "properties": {
+                                    "google_validate": {
+                                        "description": "Override Google Address Validation for all addresses in this batch. `true` = force, `false` = skip, omit = server default.",
+                                        "type": "boolean",
+                                        "example": true,
+                                        "nullable": true
+                                    },
                                     "addresses": {
                                         "description": "Array of addresses to normalize (max 50)",
                                         "type": "array",
@@ -421,7 +433,7 @@
                     "Status"
                 ],
                 "summary": "Health check and usage statistics",
-                "description": "Returns the current API client status including monthly usage, remaining quota, cache hit rate, and active AI provider.",
+                "description": "Returns the current API client status.\n\n**When to use:** To monitor your usage, check remaining quota before a large batch, or verify the API is operational.\n\n**Returns:** client name, monthly limit, current usage, remaining requests, cache hit rate (0.0–1.0), and which AI provider is active (openai or anthropic).",
                 "operationId": "3f4b77f50fda21eafd0c314edb535673",
                 "responses": {
                     "200": {
@@ -516,7 +528,7 @@
                         "example": "Warszawa"
                     },
                     "street": {
-                        "description": "Street name without prefix (ul., al.)",
+                        "description": "Street name (ul. prefix removed; al./pl./os. preserved)",
                         "type": "string",
                         "example": "Marszałkowska",
                         "nullable": true
@@ -541,6 +553,113 @@
                         "description": "Human-readable formatted address",
                         "type": "string",
                         "example": "Marszałkowska 1/2, 00-001 Warszawa"
+                    },
+                    "google_validation": {
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/GoogleValidationData"
+                            }
+                        ],
+                        "nullable": true,
+                        "description": "Google Address Validation results (when enabled)"
+                    }
+                },
+                "type": "object"
+            },
+            "GoogleValidationData": {
+                "title": "Google Validation Result",
+                "description": "Address validation and geocoding data from Google Address Validation API. Only present when Google Address Validation is enabled on the server.",
+                "properties": {
+                    "latitude": {
+                        "description": "Geographic latitude",
+                        "type": "number",
+                        "format": "double",
+                        "example": 52.2297,
+                        "nullable": true
+                    },
+                    "longitude": {
+                        "description": "Geographic longitude",
+                        "type": "number",
+                        "format": "double",
+                        "example": 21.0122,
+                        "nullable": true
+                    },
+                    "place_id": {
+                        "description": "Google Place ID — can be used with Google Maps/Places API",
+                        "type": "string",
+                        "example": "ChIJAZ-GmmbMHkcR_NPqiCq-8HI",
+                        "nullable": true
+                    },
+                    "validation_granularity": {
+                        "description": "How precisely Google matched the address. SUB_PREMISE (apartment level) is the most precise, OTHER means no match.",
+                        "type": "string",
+                        "enum": [
+                            "OTHER",
+                            "ROUTE",
+                            "BLOCK",
+                            "PREMISE_PROXIMITY",
+                            "PREMISE",
+                            "SUB_PREMISE"
+                        ],
+                        "example": "PREMISE"
+                    },
+                    "geocode_granularity": {
+                        "description": "Precision level of the geographic coordinates",
+                        "type": "string",
+                        "enum": [
+                            "OTHER",
+                            "ROUTE",
+                            "BLOCK",
+                            "PREMISE_PROXIMITY",
+                            "PREMISE",
+                            "SUB_PREMISE"
+                        ],
+                        "example": "PREMISE"
+                    },
+                    "address_complete": {
+                        "description": "All address components are present and confirmed by Google",
+                        "type": "boolean",
+                        "example": true
+                    },
+                    "has_unconfirmed_components": {
+                        "description": "Some components could not be confirmed — may need manual review",
+                        "type": "boolean",
+                        "example": false
+                    },
+                    "has_inferred_components": {
+                        "description": "Google filled in missing data (e.g. inferred postal code from city)",
+                        "type": "boolean",
+                        "example": false
+                    },
+                    "has_replaced_components": {
+                        "description": "Google corrected/replaced some components (e.g. wrong postal code)",
+                        "type": "boolean",
+                        "example": false
+                    },
+                    "has_spell_corrected_components": {
+                        "description": "Spelling corrections were applied to the address",
+                        "type": "boolean",
+                        "example": false
+                    },
+                    "is_residential": {
+                        "description": "Address is classified as residential",
+                        "type": "boolean",
+                        "example": true,
+                        "nullable": true
+                    },
+                    "is_business": {
+                        "description": "Address is classified as a business location",
+                        "type": "boolean",
+                        "example": false,
+                        "nullable": true
+                    },
+                    "issues": {
+                        "description": "Human-readable list of validation issues found (empty = no issues)",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "example": []
                     }
                 },
                 "type": "object"
@@ -623,11 +742,11 @@
     "tags": [
         {
             "name": "Address Normalization",
-            "description": "Endpoints for normalizing postal addresses"
+            "description": "Normalize single or batch postal addresses. Send raw, messy address data and receive structured, validated results with confidence scores. Supports 31 European countries."
         },
         {
             "name": "Status",
-            "description": "Health check and usage statistics"
+            "description": "Check API health, your monthly usage, remaining quota, cache hit rate, and which AI provider is active."
         }
     ],
     "security": [

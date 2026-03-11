@@ -23,6 +23,7 @@ class BatchNormalizeRequest extends FormRequest
             'addresses.*.postal_code' => ['nullable', 'string', 'max:20'],
             'addresses.*.full_name' => ['nullable', 'string', 'max:255'],
             'addresses.*.id' => ['nullable', 'string', 'max:100'],
+            'google_validate' => ['nullable', 'boolean'],
         ];
     }
 }
