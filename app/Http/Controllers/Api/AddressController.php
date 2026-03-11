@@ -7,8 +7,10 @@ use App\Exceptions\NormalizationException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\BatchNormalizeRequest;
 use App\Http\Requests\NormalizeAddressRequest;
+use App\Http\Requests\ValidateAddressRequest;
 use App\Models\RequestLog;
 use App\Services\AddressNormalizer;
+use App\Services\GoogleAddressValidationClient;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use OpenApi\Attributes as OA;
@@ -18,6 +20,10 @@ use OpenApi\Attributes as OA;
     description: 'Normalize single or batch postal addresses. Send raw, messy address data and receive structured, validated results with confidence scores. Supports 31 European countries.',
 )]
 #[OA\Tag(
+    name: 'Address Validation',
+    description: 'Validate addresses directly via Google Address Validation API — get coordinates, quality flags, and deliverability checks without AI normalization.',
+)]
+#[OA\Tag(
     name: 'Status',
     description: 'Check API health, your monthly usage, remaining quota, cache hit rate, and which AI provider is active.',
 )]
@@ -25,6 +31,7 @@ class AddressController extends Controller
 {
     public function __construct(
         private readonly AddressNormalizer $normalizer,
+        private readonly GoogleAddressValidationClient $googleValidator,
     ) {}
 
     #[OA\Post(
@@ -252,6 +259,99 @@ DESC,
                 'message' => 'All AI providers are currently unavailable. Please try again later.',
             ], 503);
         }
+    }
+
+    #[OA\Post(
+        path: '/api/v1/validate',
+        summary: 'Validate an address via Google Address Validation API',
+        description: <<<'DESC'
+Validates an address directly through Google Address Validation API **without AI normalization**.
+
+**When to use:**
+- After a previous `/normalize` call (without Google validation) to verify the result
+- To get geographic coordinates for an already-clean address
+- To check address deliverability without running the full normalization pipeline
+
+**What it returns:** geographic coordinates (lat/lng), validation granularity, quality flags, property type (residential/business), and a list of issues found.
+
+**Note:** This endpoint requires Google Address Validation to be configured on the server (`GOOGLE_VALIDATION_API_KEY`). Returns `503` if not configured.
+DESC,
+        security: [['bearerAuth' => []]],
+        tags: ['Address Validation'],
+    )]
+    #[OA\RequestBody(
+        required: true,
+        content: new OA\JsonContent(
+            required: ['country', 'city', 'address'],
+            properties: [
+                new OA\Property(property: 'country', type: 'string', description: 'ISO 3166-1 alpha-2 country code', example: 'PL', minLength: 2, maxLength: 2),
+                new OA\Property(property: 'postal_code', type: 'string', description: 'Postal/ZIP code', example: '00-001', nullable: true),
+                new OA\Property(property: 'city', type: 'string', description: 'City name', example: 'Warszawa', maxLength: 255),
+                new OA\Property(property: 'address', type: 'string', description: 'Street address line', example: 'Marszałkowska 1/2', maxLength: 500),
+            ],
+        ),
+    )]
+    #[OA\Response(
+        response: 200,
+        description: 'Address validated successfully',
+        content: new OA\JsonContent(
+            properties: [
+                new OA\Property(property: 'status', type: 'string', enum: ['ok'], example: 'ok'),
+                new OA\Property(property: 'validation', ref: '#/components/schemas/GoogleValidationData'),
+            ],
+        ),
+    )]
+    #[OA\Response(response: 401, ref: '#/components/responses/Unauthorized')]
+    #[OA\Response(
+        response: 422,
+        description: 'Validation error',
+        content: new OA\JsonContent(
+            properties: [
+                new OA\Property(property: 'message', type: 'string', example: 'The country field is required.'),
+                new OA\Property(property: 'errors', type: 'object'),
+            ],
+        ),
+    )]
+    #[OA\Response(response: 429, ref: '#/components/responses/RateLimitExceeded')]
+    #[OA\Response(
+        response: 503,
+        description: 'Google Address Validation is not configured or unavailable',
+        content: new OA\JsonContent(
+            properties: [
+                new OA\Property(property: 'status', type: 'string', example: 'error'),
+                new OA\Property(property: 'message', type: 'string', example: 'Google Address Validation is not configured. Set GOOGLE_VALIDATION_API_KEY in server configuration.'),
+            ],
+        ),
+    )]
+    public function validate(ValidateAddressRequest $request): JsonResponse
+    {
+        if (! $this->googleValidator->isEnabled()) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Google Address Validation is not configured. Set GOOGLE_VALIDATION_API_KEY in server configuration.',
+            ], 503);
+        }
+
+        $validated = $request->validated();
+
+        $result = $this->googleValidator->validateRaw(
+            countryCode: $validated['country'],
+            postalCode: $validated['postal_code'] ?? null,
+            city: $validated['city'],
+            address: $validated['address'],
+        );
+
+        if (! $result) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Google Address Validation API returned no result. Please try again.',
+            ], 503);
+        }
+
+        return response()->json([
+            'status' => 'ok',
+            'validation' => $result->toArray(),
+        ]);
     }
 
     #[OA\Get(

@@ -59,6 +59,53 @@ class GoogleAddressValidationClient
         }
     }
 
+    /**
+     * Validate a raw address (not yet normalized) via Google Address Validation API.
+     */
+    public function validateRaw(
+        string $countryCode,
+        ?string $postalCode,
+        string $city,
+        string $address,
+    ): ?GoogleValidationResult {
+        if (! $this->isEnabled()) {
+            return null;
+        }
+
+        try {
+            $url = self::API_URL . '?key=' . config('normalizer.google_validation.api_key');
+
+            $payload = array_filter([
+                'regionCode' => $countryCode,
+                'locality' => $city,
+                'postalCode' => $postalCode,
+                'addressLines' => [$address],
+            ]);
+
+            $response = Http::timeout(config('normalizer.google_validation.timeout', 5))
+                ->post($url, ['address' => $payload]);
+
+            if (! $response->successful()) {
+                Log::warning('Google Address Validation API error', [
+                    'status' => $response->status(),
+                    'body' => $response->body(),
+                ]);
+
+                return null;
+            }
+
+            $result = $response->json('result');
+
+            return $result ? GoogleValidationResult::fromApiResponse($result) : null;
+        } catch (\Throwable $e) {
+            Log::warning('Google Address Validation API exception', [
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
     private function buildAddressPayload(NormalizedAddress $address): array
     {
         $addressLines = [];

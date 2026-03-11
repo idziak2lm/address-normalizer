@@ -427,6 +427,132 @@
                 ]
             }
         },
+        "/api/v1/validate": {
+            "post": {
+                "tags": [
+                    "Address Validation"
+                ],
+                "summary": "Validate an address via Google Address Validation API",
+                "description": "Validates an address directly through Google Address Validation API **without AI normalization**.\n\n**When to use:**\n- After a previous `/normalize` call (without Google validation) to verify the result\n- To get geographic coordinates for an already-clean address\n- To check address deliverability without running the full normalization pipeline\n\n**What it returns:** geographic coordinates (lat/lng), validation granularity, quality flags, property type (residential/business), and a list of issues found.\n\n**Note:** This endpoint requires Google Address Validation to be configured on the server (`GOOGLE_VALIDATION_API_KEY`). Returns `503` if not configured.",
+                "operationId": "0b426d7229fa29f066ee34d0a22fc88b",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "country",
+                                    "city",
+                                    "address"
+                                ],
+                                "properties": {
+                                    "country": {
+                                        "description": "ISO 3166-1 alpha-2 country code",
+                                        "type": "string",
+                                        "maxLength": 2,
+                                        "minLength": 2,
+                                        "example": "PL"
+                                    },
+                                    "postal_code": {
+                                        "description": "Postal/ZIP code",
+                                        "type": "string",
+                                        "example": "00-001",
+                                        "nullable": true
+                                    },
+                                    "city": {
+                                        "description": "City name",
+                                        "type": "string",
+                                        "maxLength": 255,
+                                        "example": "Warszawa"
+                                    },
+                                    "address": {
+                                        "description": "Street address line",
+                                        "type": "string",
+                                        "maxLength": 500,
+                                        "example": "Marszałkowska 1/2"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Address validated successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "status": {
+                                            "type": "string",
+                                            "enum": [
+                                                "ok"
+                                            ],
+                                            "example": "ok"
+                                        },
+                                        "validation": {
+                                            "$ref": "#/components/schemas/GoogleValidationData"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "$ref": "#/components/responses/Unauthorized"
+                    },
+                    "422": {
+                        "description": "Validation error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "message": {
+                                            "type": "string",
+                                            "example": "The country field is required."
+                                        },
+                                        "errors": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "$ref": "#/components/responses/RateLimitExceeded"
+                    },
+                    "503": {
+                        "description": "Google Address Validation is not configured or unavailable",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Google Address Validation is not configured. Set GOOGLE_VALIDATION_API_KEY in server configuration."
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/status": {
             "get": {
                 "tags": [
@@ -743,6 +869,10 @@
         {
             "name": "Address Normalization",
             "description": "Normalize single or batch postal addresses. Send raw, messy address data and receive structured, validated results with confidence scores. Supports 31 European countries."
+        },
+        {
+            "name": "Address Validation",
+            "description": "Validate addresses directly via Google Address Validation API — get coordinates, quality flags, and deliverability checks without AI normalization."
         },
         {
             "name": "Status",
