@@ -127,20 +127,30 @@ class GoogleAddressValidationClient
         }
     }
 
+    // Countries where house number comes before street name (e.g. "15 Rue de Rivoli")
+    private const NUMBER_BEFORE_STREET = ['FR', 'BE', 'LU', 'MC'];
+
     private function buildAddressPayload(NormalizedAddress $address): array
     {
         // Build a full formatted address line for Google to parse.
         // Google works best with a complete, human-readable address string.
         $parts = [];
 
-        $streetLine = $address->street ?? '';
-        if ($address->house_number) {
-            $streetLine .= ' ' . $address->house_number;
-        }
+        $number = $address->house_number ?? '';
         if ($address->apartment_number) {
-            $streetLine .= '/' . $address->apartment_number;
+            $number .= '/' . $address->apartment_number;
         }
-        $streetLine = trim($streetLine);
+
+        $street = $address->street ?? '';
+        $country = strtoupper($address->country_code ?? '');
+
+        if (in_array($country, self::NUMBER_BEFORE_STREET, true)) {
+            // FR/BE/LU/MC: "15 Rue de Rivoli"
+            $streetLine = trim($number . ' ' . $street);
+        } else {
+            // Most countries: "Srebrzyńska 8D"
+            $streetLine = trim($street . ' ' . $number);
+        }
 
         if ($streetLine !== '') {
             $parts[] = $streetLine;
