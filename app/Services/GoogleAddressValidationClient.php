@@ -63,6 +63,11 @@ class GoogleAddressValidationClient
                 return null;
             }
 
+            Log::debug('Google Address Validation raw response', [
+                'payload' => $this->buildAddressPayload($address),
+                'result' => $result,
+            ]);
+
             return GoogleValidationResult::fromApiResponse($result);
         } catch (\Throwable $e) {
             Log::warning('Google Address Validation API exception', [
@@ -137,10 +142,6 @@ class GoogleAddressValidationClient
         $parts = [];
 
         $number = $address->house_number ?? '';
-        if ($address->apartment_number) {
-            $number .= '/' . $address->apartment_number;
-        }
-
         $street = $address->street ?? '';
         $country = strtoupper($address->country_code ?? '');
 
@@ -154,6 +155,11 @@ class GoogleAddressValidationClient
 
         if ($streetLine !== '') {
             $parts[] = $streetLine;
+        }
+
+        // Apartment as separate part so Google doesn't merge it with street_number
+        if ($address->apartment_number) {
+            $parts[] = 'Apt ' . $address->apartment_number;
         }
 
         if ($address->postal_code && $address->city) {

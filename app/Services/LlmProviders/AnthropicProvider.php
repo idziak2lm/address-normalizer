@@ -47,7 +47,9 @@ class AnthropicProvider implements LlmProviderInterface
         }
 
         $userContent = $this->formatBatchInput($inputs);
-        $results = $this->callApi(SystemPrompt::get(), $userContent);
+        $batchTimeout = max($this->timeout, count($inputs) * 3);
+        $batchMaxTokens = count($inputs) * 200;
+        $results = $this->callApi(SystemPrompt::get(), $userContent, $batchTimeout, $batchMaxTokens);
 
         if (isset($results['country_code'])) {
             $results = [$results];
@@ -64,9 +66,11 @@ class AnthropicProvider implements LlmProviderInterface
         return 'anthropic';
     }
 
-    private function callApi(string $systemPrompt, string $userContent): array
+    private function callApi(string $systemPrompt, string $userContent, ?int $timeout = null, ?int $maxTokens = null): array
     {
         $lastException = null;
+        $timeout ??= $this->timeout;
+        $maxTokens ??= 2000;
 
         for ($attempt = 0; $attempt <= $this->maxRetries; $attempt++) {
             if ($attempt > 0) {
@@ -79,10 +83,10 @@ class AnthropicProvider implements LlmProviderInterface
                     'anthropic-version' => '2023-06-01',
                     'content-type' => 'application/json',
                 ])
-                    ->timeout($this->timeout)
+                    ->timeout($timeout)
                     ->post('https://api.anthropic.com/v1/messages', [
                         'model' => $this->model,
-                        'max_tokens' => 2000,
+                        'max_tokens' => $maxTokens,
                         'system' => $systemPrompt,
                         'messages' => [
                             ['role' => 'user', 'content' => $userContent],

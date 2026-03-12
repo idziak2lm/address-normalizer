@@ -47,7 +47,10 @@ class OpenAiProvider implements LlmProviderInterface
         }
 
         $userContent = $this->formatBatchInput($inputs);
-        $results = $this->callApi(SystemPrompt::get(), $userContent);
+        // Batch needs more time and tokens: ~150 tokens per address
+        $batchTimeout = max($this->timeout, count($inputs) * 3);
+        $batchMaxTokens = count($inputs) * 200;
+        $results = $this->callApi(SystemPrompt::get(), $userContent, $batchTimeout, $batchMaxTokens);
 
         // If the result is a single object (not array), wrap it
         if (isset($results['country_code'])) {
@@ -65,9 +68,11 @@ class OpenAiProvider implements LlmProviderInterface
         return 'openai';
     }
 
-    private function callApi(string $systemPrompt, string $userContent): array
+    private function callApi(string $systemPrompt, string $userContent, ?int $timeout = null, ?int $maxTokens = null): array
     {
         $lastException = null;
+        $timeout ??= $this->timeout;
+        $maxTokens ??= 2000;
 
         for ($attempt = 0; $attempt <= $this->maxRetries; $attempt++) {
             if ($attempt > 0) {
@@ -76,7 +81,7 @@ class OpenAiProvider implements LlmProviderInterface
 
             try {
                 $response = Http::withToken($this->apiKey)
-                    ->timeout($this->timeout)
+                    ->timeout($timeout)
                     ->post('https://api.openai.com/v1/chat/completions', [
                         'model' => $this->model,
                         'response_format' => ['type' => 'json_object'],
@@ -85,7 +90,7 @@ class OpenAiProvider implements LlmProviderInterface
                             ['role' => 'user', 'content' => $userContent],
                         ],
                         'temperature' => 0.1,
-                        'max_tokens' => 2000,
+                        'max_tokens' => $maxTokens,
                     ]);
 
                 if ($response->failed()) {
