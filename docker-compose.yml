@@ -14,6 +14,22 @@ services:
     networks:
       - normalizer
 
+  queue-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: normalizer-queue
+    restart: unless-stopped
+    working_dir: /var/www
+    command: php artisan queue:work redis --queue=csv-processing --timeout=1800 --tries=1 --sleep=3
+    volumes:
+      - .:/var/www
+    depends_on:
+      - mysql
+      - redis
+    networks:
+      - normalizer
+
   nginx:
     image: nginx:alpine
     container_name: normalizer-nginx
