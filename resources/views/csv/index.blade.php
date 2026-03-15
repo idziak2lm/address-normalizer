@@ -155,10 +155,11 @@ ORD-12347;DE;10115;Berlin;Friedrichstrasse 123;Hans Mueller;TechGmbH</pre>
                 <code>street</code>, <code>house_number</code>, <code>apartment_number</code>, <code>company_name</code>,
                 <code>formatted</code>, <code>removed_noise</code>,
                 <code>latitude</code>, <code>longitude</code>, <code>validation_granularity</code>,
-                <code>address_complete</code>, <code>validation_issues</code>, <code>error</code>.
+                <code>address_complete</code>, <code>places_resolved_street</code>, <code>validation_issues</code>, <code>error</code>.
             </p>
             <p class="text-xs text-blue-600 mt-1">
                 Geographic coordinates and validation fields are populated when Google Address Validation is enabled.
+                When a street name cannot be confirmed, the system uses Google Places API to find the correct name &mdash; the corrected value appears in <code>places_resolved_street</code>.
             </p>
         </div>
     </div>

@@ -25,7 +25,38 @@ final readonly class GoogleValidationResult
         public ?bool $isResidential,
         public ?bool $isBusiness,
         public array $addressComponents = [],
+        public ?string $placesResolvedStreet = null,
     ) {}
+
+    /**
+     * Return a copy with the Places-resolved street name set.
+     */
+    public function withPlacesResolvedStreet(string $street): self
+    {
+        return new self(
+            latitude: $this->latitude,
+            longitude: $this->longitude,
+            placeId: $this->placeId,
+            validationGranularity: $this->validationGranularity,
+            geocodeGranularity: $this->geocodeGranularity,
+            addressComplete: $this->addressComplete,
+            hasUnconfirmedComponents: $this->hasUnconfirmedComponents,
+            hasInferredComponents: $this->hasInferredComponents,
+            hasReplacedComponents: $this->hasReplacedComponents,
+            hasSpellCorrectedComponents: $this->hasSpellCorrectedComponents,
+            missingComponentTypes: $this->missingComponentTypes,
+            unconfirmedComponentTypes: $this->unconfirmedComponentTypes,
+            unresolvedTokens: $this->unresolvedTokens,
+            formattedAddress: $this->formattedAddress,
+            correctedPostalCode: $this->correctedPostalCode,
+            correctedCity: $this->correctedCity,
+            correctedStreet: $this->correctedStreet,
+            isResidential: $this->isResidential,
+            isBusiness: $this->isBusiness,
+            addressComponents: $this->addressComponents,
+            placesResolvedStreet: $street,
+        );
+    }
 
     public static function fromApiResponse(array $result): self
     {
@@ -125,8 +156,23 @@ final readonly class GoogleValidationResult
     }
 
     /**
-     * Build a list of human-readable validation issues.
+     * Check if the route (street name) is unconfirmed and geocode is not at premise level.
+     * This signals that Google couldn't find the street — a Places Autocomplete lookup may help.
      */
+    public function hasUnconfirmedRoute(): bool
+    {
+        $routeComponent = $this->addressComponents['route'] ?? null;
+
+        if (! $routeComponent) {
+            return false;
+        }
+
+        $isUnconfirmed = ! $routeComponent['confirmed'];
+        $notPremiseLevel = ! in_array($this->geocodeGranularity, ['SUB_PREMISE', 'PREMISE', 'PREMISE_PROXIMITY']);
+
+        return $isUnconfirmed && $notPremiseLevel;
+    }
+
     public function issues(): array
     {
         $issues = [];
@@ -179,6 +225,7 @@ final readonly class GoogleValidationResult
             'is_residential' => $this->isResidential,
             'is_business' => $this->isBusiness,
             'address_components' => $this->addressComponents,
+            'places_resolved_street' => $this->placesResolvedStreet,
             'issues' => $this->issues(),
         ];
     }

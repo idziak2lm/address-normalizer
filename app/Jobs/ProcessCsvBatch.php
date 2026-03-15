@@ -175,6 +175,7 @@ class ProcessCsvBatch implements ShouldQueue
                         'longitude' => $googleValidation['longitude'] ?? '',
                         'validation_granularity' => $googleValidation['validation_granularity'] ?? '',
                         'address_complete' => isset($googleValidation['address_complete']) ? ($googleValidation['address_complete'] ? 'yes' : 'no') : '',
+                        'places_resolved_street' => $googleValidation['places_resolved_street'] ?? '',
                         'validation_issues' => implode(' | ', $googleValidation['issues'] ?? []),
                         'error' => '',
                     ];
@@ -220,7 +221,7 @@ class ProcessCsvBatch implements ShouldQueue
             'street', 'house_number', 'apartment_number', 'company_name',
             'formatted', 'removed_noise',
             'latitude', 'longitude', 'validation_granularity',
-            'address_complete', 'validation_issues',
+            'address_complete', 'places_resolved_street', 'validation_issues',
             'error',
         ];
     }
@@ -246,6 +247,7 @@ class ProcessCsvBatch implements ShouldQueue
             'longitude' => '',
             'validation_granularity' => '',
             'address_complete' => '',
+            'places_resolved_street' => '',
             'validation_issues' => '',
             'error' => $error,
         ];

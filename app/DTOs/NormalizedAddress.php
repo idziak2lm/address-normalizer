@@ -103,6 +103,8 @@ final readonly class NormalizedAddress
             correctedStreet: $data['corrected_street'] ?? null,
             isResidential: $data['is_residential'] ?? null,
             isBusiness: $data['is_business'] ?? null,
+            addressComponents: $data['address_components'] ?? [],
+            placesResolvedStreet: $data['places_resolved_street'] ?? null,
         );
     }
 }

@@ -191,9 +191,8 @@ class GoogleAddressValidationClientTest extends TestCase
 
             return str_contains($request->url(), 'key=test-google-key')
                 && $body['address']['regionCode'] === 'PL'
-                && $body['address']['locality'] === 'Warszawa'
-                && $body['address']['postalCode'] === '00-001'
-                && $body['address']['addressLines'] === ['Marszałkowska 1/2'];
+                && str_contains($body['address']['addressLines'][0], 'Marszałkowska 1')
+                && str_contains($body['address']['addressLines'][0], '00-001 Warszawa');
         });
     }
 
@@ -227,6 +226,379 @@ class GoogleAddressValidationClientTest extends TestCase
         $this->assertEquals('PREMISE', $array['validation_granularity']);
         $this->assertTrue($array['address_complete']);
         $this->assertIsArray($array['issues']);
+    }
+
+    // === Places Autocomplete route resolution tests ===
+
+    public function test_has_unconfirmed_route_detects_problem(): void
+    {
+        $response = $this->sampleApiResponse();
+        $response['verdict']['geocodeGranularity'] = 'OTHER';
+        $response['address']['addressComponents'] = [
+            [
+                'componentName' => ['text' => 'Mitteihäusserstraße', 'languageCode' => 'de'],
+                'componentType' => 'route',
+                'confirmationLevel' => 'UNCONFIRMED_BUT_PLAUSIBLE',
+            ],
+            [
+                'componentName' => ['text' => '10'],
+                'componentType' => 'street_number',
+                'confirmationLevel' => 'UNCONFIRMED_BUT_PLAUSIBLE',
+            ],
+        ];
+
+        $validation = GoogleValidationResult::fromApiResponse($response);
+
+        $this->assertTrue($validation->hasUnconfirmedRoute());
+    }
+
+    public function test_has_unconfirmed_route_false_when_confirmed(): void
+    {
+        $response = $this->sampleApiResponse();
+        $response['address']['addressComponents'] = [
+            [
+                'componentName' => ['text' => 'Marszałkowska'],
+                'componentType' => 'route',
+                'confirmationLevel' => 'CONFIRMED',
+            ],
+        ];
+
+        $validation = GoogleValidationResult::fromApiResponse($response);
+
+        $this->assertFalse($validation->hasUnconfirmedRoute());
+    }
+
+    public function test_has_unconfirmed_route_false_when_premise_level(): void
+    {
+        $response = $this->sampleApiResponse();
+        $response['verdict']['geocodeGranularity'] = 'PREMISE';
+        $response['address']['addressComponents'] = [
+            [
+                'componentName' => ['text' => 'Marszałkowska'],
+                'componentType' => 'route',
+                'confirmationLevel' => 'UNCONFIRMED_BUT_PLAUSIBLE',
+            ],
+        ];
+
+        $validation = GoogleValidationResult::fromApiResponse($response);
+
+        $this->assertFalse($validation->hasUnconfirmedRoute());
+    }
+
+    public function test_resolve_unconfirmed_route_full_flow(): void
+    {
+        config(['normalizer.google_validation.places_resolve_enabled' => true]);
+
+        // 1. Initial Address Validation - unconfirmed route
+        // 2. Places Autocomplete - returns placeId
+        // 3. Place Details - returns corrected street
+        // 4. Re-validation with corrected street - confirmed
+        Http::fake([
+            'places.googleapis.com/v1/places:autocomplete' => Http::response([
+                'suggestions' => [
+                    [
+                        'placePrediction' => [
+                            'placeId' => 'ChIJ_corrected_place',
+                            'text' => ['text' => 'Mittelhäusserstraße 10, 27336 Rethem (Aller)'],
+                        ],
+                    ],
+                ],
+            ]),
+            'places.googleapis.com/v1/places/ChIJ_corrected_place' => Http::response([
+                'addressComponents' => [
+                    ['longText' => '10', 'shortText' => '10', 'types' => ['street_number']],
+                    ['longText' => 'Mittelhäusserstraße', 'shortText' => 'Mittelhäusserstr.', 'types' => ['route']],
+                    ['longText' => '27336', 'shortText' => '27336', 'types' => ['postal_code']],
+                    ['longText' => 'Rethem (Aller)', 'shortText' => 'Rethem', 'types' => ['locality']],
+                ],
+            ]),
+            'addressvalidation.googleapis.com/*' => Http::response([
+                'result' => $this->confirmedDeApiResponse(),
+            ]),
+        ]);
+
+        $address = new NormalizedAddress(
+            country_code: 'DE',
+            region: null,
+            postal_code: '27336',
+            city: 'Rethem (Aller)',
+            street: 'Mitteihäusserstraße',
+            house_number: '10',
+            apartment_number: null,
+            company_name: null,
+            formatted: 'Mitteihäusserstraße 10, 27336 Rethem (Aller)',
+            removed_noise: [],
+            confidence: 0.85,
+        );
+
+        $unconfirmedValidation = GoogleValidationResult::fromApiResponse(
+            $this->unconfirmedRouteApiResponse()
+        );
+
+        $corrected = $this->client->applyCorrections($address, $unconfirmedValidation);
+
+        $this->assertEquals('Mittelhäusserstraße', $corrected->street);
+        $this->assertEquals('Mittelhäusserstraße', $corrected->google_validation->placesResolvedStreet);
+        // Re-validated at PREMISE level: +0.05 (PREMISE) +0.05 (complete) = +0.10
+        $this->assertGreaterThan(0.85, $corrected->confidence);
+    }
+
+    public function test_resolve_skipped_when_places_disabled(): void
+    {
+        config(['normalizer.google_validation.places_resolve_enabled' => false]);
+
+        Http::fake();
+
+        $address = new NormalizedAddress(
+            country_code: 'DE',
+            region: null,
+            postal_code: '27336',
+            city: 'Rethem (Aller)',
+            street: 'Mitteihäusserstraße',
+            house_number: '10',
+            apartment_number: null,
+            company_name: null,
+            formatted: 'Mitteihäusserstraße 10, 27336 Rethem (Aller)',
+            removed_noise: [],
+            confidence: 0.85,
+        );
+
+        $unconfirmedValidation = GoogleValidationResult::fromApiResponse(
+            $this->unconfirmedRouteApiResponse()
+        );
+
+        $corrected = $this->client->applyCorrections($address, $unconfirmedValidation);
+
+        // Street stays original — Places was not called
+        $this->assertEquals('Mitteihäusserstraße', $corrected->street);
+
+        Http::assertNothingSent();
+    }
+
+    public function test_resolve_skipped_when_autocomplete_returns_no_results(): void
+    {
+        config(['normalizer.google_validation.places_resolve_enabled' => true]);
+
+        Http::fake([
+            'places.googleapis.com/v1/places:autocomplete' => Http::response([
+                'suggestions' => [],
+            ]),
+        ]);
+
+        $address = new NormalizedAddress(
+            country_code: 'DE',
+            region: null,
+            postal_code: '27336',
+            city: 'Rethem (Aller)',
+            street: 'Mitteihäusserstraße',
+            house_number: '10',
+            apartment_number: null,
+            company_name: null,
+            formatted: 'Mitteihäusserstraße 10, 27336 Rethem (Aller)',
+            removed_noise: [],
+            confidence: 0.85,
+        );
+
+        $unconfirmedValidation = GoogleValidationResult::fromApiResponse(
+            $this->unconfirmedRouteApiResponse()
+        );
+
+        $corrected = $this->client->applyCorrections($address, $unconfirmedValidation);
+
+        $this->assertEquals('Mitteihäusserstraße', $corrected->street);
+    }
+
+    public function test_resolve_skipped_when_places_returns_same_street(): void
+    {
+        config(['normalizer.google_validation.places_resolve_enabled' => true]);
+
+        Http::fake([
+            'places.googleapis.com/v1/places:autocomplete' => Http::response([
+                'suggestions' => [
+                    [
+                        'placePrediction' => [
+                            'placeId' => 'ChIJ_same_place',
+                            'text' => ['text' => 'Mitteihäusserstraße 10, 27336 Rethem'],
+                        ],
+                    ],
+                ],
+            ]),
+            'places.googleapis.com/v1/places/ChIJ_same_place' => Http::response([
+                'addressComponents' => [
+                    ['longText' => 'Mitteihäusserstraße', 'types' => ['route']],
+                ],
+            ]),
+        ]);
+
+        $address = new NormalizedAddress(
+            country_code: 'DE',
+            region: null,
+            postal_code: '27336',
+            city: 'Rethem (Aller)',
+            street: 'Mitteihäusserstraße',
+            house_number: '10',
+            apartment_number: null,
+            company_name: null,
+            formatted: 'Mitteihäusserstraße 10, 27336 Rethem (Aller)',
+            removed_noise: [],
+            confidence: 0.85,
+        );
+
+        $unconfirmedValidation = GoogleValidationResult::fromApiResponse(
+            $this->unconfirmedRouteApiResponse()
+        );
+
+        $corrected = $this->client->applyCorrections($address, $unconfirmedValidation);
+
+        // Same street — no change, no re-validation call
+        $this->assertEquals('Mitteihäusserstraße', $corrected->street);
+
+        Http::assertNotSent(fn ($r) => str_contains($r->url(), 'addressvalidation'));
+    }
+
+    public function test_resolve_handles_autocomplete_api_error_gracefully(): void
+    {
+        config(['normalizer.google_validation.places_resolve_enabled' => true]);
+
+        Http::fake([
+            'places.googleapis.com/v1/places:autocomplete' => Http::response('Server Error', 500),
+        ]);
+
+        $address = new NormalizedAddress(
+            country_code: 'DE',
+            region: null,
+            postal_code: '27336',
+            city: 'Rethem (Aller)',
+            street: 'Mitteihäusserstraße',
+            house_number: '10',
+            apartment_number: null,
+            company_name: null,
+            formatted: 'Mitteihäusserstraße 10, 27336 Rethem (Aller)',
+            removed_noise: [],
+            confidence: 0.85,
+        );
+
+        $unconfirmedValidation = GoogleValidationResult::fromApiResponse(
+            $this->unconfirmedRouteApiResponse()
+        );
+
+        // Should not throw, should return with original validation penalties
+        $corrected = $this->client->applyCorrections($address, $unconfirmedValidation);
+
+        $this->assertEquals('Mitteihäusserstraße', $corrected->street);
+        $this->assertLessThan(0.85, $corrected->confidence); // penalty from unconfirmed
+    }
+
+    private function unconfirmedRouteApiResponse(): array
+    {
+        return [
+            'verdict' => [
+                'inputGranularity' => 'PREMISE',
+                'validationGranularity' => 'OTHER',
+                'geocodeGranularity' => 'OTHER',
+                'addressComplete' => true,
+                'hasUnconfirmedComponents' => true,
+                'hasInferredComponents' => false,
+                'hasReplacedComponents' => false,
+                'hasSpellCorrectedComponents' => false,
+            ],
+            'address' => [
+                'formattedAddress' => 'Mitteihäusserstraße 10, 27336 Rethem (Aller), Deutschland',
+                'postalAddress' => [
+                    'regionCode' => 'DE',
+                    'postalCode' => '27336',
+                    'locality' => 'Rethem (Aller)',
+                    'addressLines' => ['Mitteihäusserstraße 10'],
+                ],
+                'addressComponents' => [
+                    [
+                        'componentName' => ['text' => 'Mitteihäusserstraße', 'languageCode' => 'de'],
+                        'componentType' => 'route',
+                        'confirmationLevel' => 'UNCONFIRMED_BUT_PLAUSIBLE',
+                    ],
+                    [
+                        'componentName' => ['text' => '10'],
+                        'componentType' => 'street_number',
+                        'confirmationLevel' => 'UNCONFIRMED_BUT_PLAUSIBLE',
+                    ],
+                    [
+                        'componentName' => ['text' => '27336'],
+                        'componentType' => 'postal_code',
+                        'confirmationLevel' => 'CONFIRMED',
+                    ],
+                    [
+                        'componentName' => ['text' => 'Rethem (Aller)', 'languageCode' => 'de'],
+                        'componentType' => 'locality',
+                        'confirmationLevel' => 'CONFIRMED',
+                    ],
+                ],
+                'missingComponentTypes' => [],
+                'unconfirmedComponentTypes' => ['route', 'street_number'],
+                'unresolvedTokens' => [],
+            ],
+            'geocode' => [
+                'location' => ['latitude' => 52.7851387, 'longitude' => 9.3789288],
+                'placeId' => 'ChIJEWPqSyv0sEcRsFbWe_I9JgQ',
+                'featureSizeMeters' => 8855.0205,
+            ],
+        ];
+    }
+
+    private function confirmedDeApiResponse(): array
+    {
+        return [
+            'verdict' => [
+                'validationGranularity' => 'PREMISE',
+                'geocodeGranularity' => 'PREMISE',
+                'addressComplete' => true,
+                'hasUnconfirmedComponents' => false,
+                'hasInferredComponents' => false,
+                'hasReplacedComponents' => false,
+                'hasSpellCorrectedComponents' => false,
+            ],
+            'address' => [
+                'formattedAddress' => 'Mittelhäusserstraße 10, 27336 Rethem (Aller), Deutschland',
+                'postalAddress' => [
+                    'regionCode' => 'DE',
+                    'postalCode' => '27336',
+                    'locality' => 'Rethem (Aller)',
+                    'addressLines' => ['Mittelhäusserstraße 10'],
+                ],
+                'addressComponents' => [
+                    [
+                        'componentName' => ['text' => 'Mittelhäusserstraße', 'languageCode' => 'de'],
+                        'componentType' => 'route',
+                        'confirmationLevel' => 'CONFIRMED',
+                    ],
+                    [
+                        'componentName' => ['text' => '10'],
+                        'componentType' => 'street_number',
+                        'confirmationLevel' => 'CONFIRMED',
+                    ],
+                    [
+                        'componentName' => ['text' => '27336'],
+                        'componentType' => 'postal_code',
+                        'confirmationLevel' => 'CONFIRMED',
+                    ],
+                    [
+                        'componentName' => ['text' => 'Rethem (Aller)', 'languageCode' => 'de'],
+                        'componentType' => 'locality',
+                        'confirmationLevel' => 'CONFIRMED',
+                    ],
+                ],
+                'missingComponentTypes' => [],
+                'unconfirmedComponentTypes' => [],
+                'unresolvedTokens' => [],
+            ],
+            'geocode' => [
+                'location' => ['latitude' => 52.7868, 'longitude' => 9.3812],
+                'placeId' => 'ChIJ_corrected_validated',
+            ],
+            'metadata' => [
+                'residential' => true,
+                'business' => false,
+            ],
+        ];
     }
 
     private function makeAddress(

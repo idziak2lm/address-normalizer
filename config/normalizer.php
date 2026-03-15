@@ -25,6 +25,7 @@ return [
         'enabled' => (bool) env('GOOGLE_VALIDATION_ENABLED', false),
         'api_key' => env('GOOGLE_VALIDATION_API_KEY'),
         'timeout' => (int) env('GOOGLE_VALIDATION_TIMEOUT', 5),
+        'places_resolve_enabled' => (bool) env('GOOGLE_PLACES_RESOLVE_ENABLED', true),
     ],
 
     // Libpostal (optional microservice)
